@@ -52,7 +52,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile 
-      container_name: volweb-workers
+    container_name: volweb-workers
     environment:
       - DATABASE=${DATABASE}
       - DATABASE_HOST=${DATABASE_HOST}
