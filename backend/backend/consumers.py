@@ -81,10 +81,17 @@ class CasesTaskConsumer(AsyncJsonWebsocketConsumer):
             )
         )
 
-
 class EvidencesTaskConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
-        self.room_group_name = "evidences"
+        # Check if case_id is provided in the URL
+        self.case_id = self.scope["url_route"]["kwargs"].get("case_id")
+        
+        # Use different group names for different contexts
+        if self.case_id:
+            self.room_group_name = f"evidences_case_{self.case_id}"
+        else:
+            self.room_group_name = "evidences"
+            
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
@@ -126,6 +133,86 @@ class EvidencesTaskConsumer(AsyncJsonWebsocketConsumer):
 class SymbolsTaskConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.room_group_name = "symbols"
+        # Join room group
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        # Leave room group
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    # Receive message from WebSocket
+    async def receive(self, text_data):
+        text_data_json = json.loads(text_data)
+        message = text_data_json["message"]
+        status = text_data_json["status"]
+        # Send message to room group
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "send_notification",
+                "status": status,
+                "message": message,
+            },
+        )
+
+    # Receive message from room group
+    async def send_notification(self, event):
+        message = event["message"]
+        status = event["status"]
+        # Send message to WebSocket
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "status": status,
+                    "message": message,
+                }
+            )
+        )
+
+class YaraRuleTaskConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        self.room_group_name = "yararules"
+        # Join room group
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        # Leave room group
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    # Receive message from WebSocket
+    async def receive(self, text_data):
+        text_data_json = json.loads(text_data)
+        message = text_data_json["message"]
+        status = text_data_json["status"]
+        # Send message to room group
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "send_notification",
+                "status": status,
+                "message": message,
+            },
+        )
+
+    # Receive message from room group
+    async def send_notification(self, event):
+        message = event["message"]
+        status = event["status"]
+        # Send message to WebSocket
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "status": status,
+                    "message": message,
+                }
+            )
+        )
+        
+class YaraRuleSetTaskConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        self.room_group_name = "yararulesets"
         # Join room group
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()

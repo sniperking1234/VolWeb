@@ -1,17 +1,50 @@
 #!/bin/sh
 
-if [ "$DATABASE" = "postgres" ]; then
+set -e  # Ferma l'esecuzione in caso di errore
+
+echo "=== STARTING ENTRYPOINT ==="
+
+if [ "$DATABASE" = "postgresql" ] || [ "$DATABASE" = "postgres" ]; then
     echo "Waiting for postgres..."
 
+    # Aspetta che PostgreSQL sia raggiungibile
     while ! nc -z $DATABASE_HOST $DATABASE_PORT; do
-      sleep 0.1
-    done
+      echo "PostgreSQL is unavailable - sleeping"
+      sleep 1
+    done    
 
-    echo "PostgreSQL started"
+    echo "PostgreSQL is ready!"
 fi
-echo "Making migrations and migrating the database. "
-python manage.py makemigrations --noinput
-python manage.py migrate --noinput
-python manage.py collectstatic --noinput
-python manage.py initadmin
+
+echo "=== STARTING MIGRATIONS ==="
+echo "Current working directory: $(pwd)"
+echo "Current user: $(whoami)"
+echo "Python version: $(python --version)"
+
+echo "Checking migration status..."
+if ! python manage.py showmigrations --list > /dev/null 2>&1; then
+    echo "Migration table appears to be corrupted. Attempting to fix..."
+    
+    python manage.py migrate --run-syncdb --verbosity=2 || {
+        echo "Syncdb failed, trying fake-initial migration..."
+        python manage.py migrate --fake-initial --verbosity=2
+    }
+else
+    echo "Migration table exists, proceeding normally..."
+    echo "Django apps: $(python manage.py showmigrations --list)"
+fi
+
+echo "Making migrations..."
+python manage.py makemigrations cases evidences yararulesets yararules volatility_engine symbols --noinput --verbosity=2
+
+echo "Applying migrations..."
+python manage.py migrate --noinput --verbosity=2
+
+echo "Migrations completed successfully!"
+
+echo "Collecting static files..."
+python manage.py collectstatic --noinput --verbosity=2
+
+echo "=== ENTRYPOINT COMPLETED ==="
+
 exec "$@"

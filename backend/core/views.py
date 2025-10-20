@@ -138,6 +138,7 @@ class StatisticsApiView(APIView):
         total_evidences_windows = Evidence.objects.filter(os="windows").count()
         total_evidences_linux = Evidence.objects.filter(os="linux").count()
         total_symbols = Symbol.objects.count()
+        total_yararules = 0  ##TODO: Add YaraRule model count when implemented
         total_users = User.objects.count()
         last_5_cases = Case.objects.all()[:5]
         last_5_isf = Symbol.objects.all()[:5]
@@ -156,6 +157,7 @@ class StatisticsApiView(APIView):
                 "total_evidences_linux": total_evidences_linux,
                 "total_symbols": total_symbols,
                 "total_users": total_users,
+                "total_yararules": total_yararules,
                 "tasks": tasks_serializer.data,
                 "last_5_cases": cases_serializer.data,
                 "last_5_isf": symbols_serializer.data,

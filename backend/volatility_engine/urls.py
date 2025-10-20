@@ -11,6 +11,11 @@ from .views import (
     TasksApiView,
     EnrichedProcessView,
     RestartAnalysisTask,
+    RestartRuleCompilationTask,
+    RestartRulesetCompilationTask,
+    YaraScanTask,
+    YaraScanHistoryView,
+    YaraScanDetailView,
 )
 
 urlpatterns = [
@@ -39,4 +44,10 @@ urlpatterns = [
         EnrichedProcessView.as_view(),
     ),
     path("evidence/tasks/restart/", RestartAnalysisTask.as_view()),
+    path("yararules/tasks/restart/", RestartRuleCompilationTask.as_view()),
+    path("yararulesets/tasks/restart/", RestartRulesetCompilationTask.as_view()),
+    path("evidence/<int:evidence_id>/yarascan/history/", YaraScanHistoryView.as_view(), name="yarascan-history"),
+    path("evidence/<int:evidence_id>/yarascan/<str:plugin_name>/", YaraScanDetailView.as_view(), name="yarascan-detail"),
+    path("evidence/tasks/yarascan/", YaraScanTask.as_view()),
+
 ]

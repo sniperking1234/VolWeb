@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     "core",
     "cases",
     "evidences",
+    "yararulesets",
+    "yararules",
     "volatility_engine",
     "symbols",
     "channels",

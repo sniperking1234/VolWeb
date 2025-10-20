@@ -8,7 +8,9 @@ import InvestigateWindows from "../../components/Investigate/Windows/Components/
 import InvestigateLinux from "../../components/Investigate/Linux/Components/InvestigateLinux";
 import HomeIcon from "@mui/icons-material/Home";
 import TimelineIcon from "@mui/icons-material/Timeline";
+import SecurityIcon from "@mui/icons-material/Security";
 import Timeliner from "../../components/Investigate/Timeliner";
+import YaraScan from "../../components/Investigate/YaraScan";
 import StixModule from "../../components/StixModule";
 import ExploreLinux from "../../components/Explore/Linux/Explore";
 import ExploreWin from "../../components/Explore/Windows/Explore";
@@ -51,6 +53,7 @@ const EvidenceDetail: React.FC = () => {
   const { display_message } = useSnackbar();
   const { id } = useParams<{ id: string }>();
   const [currentEvidence, setCurrentEvidence] = React.useState<Evidence>();
+  
   useEffect(() => {
     const fetchEvidenceDetails = async () => {
       if (id) {
@@ -133,6 +136,13 @@ const EvidenceDetail: React.FC = () => {
             {...a11yProps(3)}
             sx={{ fontSize: "0.75rem" }}
           />
+          <Tab
+            label="YARA Scan"
+            icon={<SecurityIcon />}
+            iconPosition="start"
+            {...a11yProps(4)}
+            sx={{ fontSize: "0.75rem" }}
+          />
         </Tabs>
       </Box>
       <CustomTabPanel value={value} index={0}>
@@ -156,6 +166,9 @@ const EvidenceDetail: React.FC = () => {
       </CustomTabPanel>
       <CustomTabPanel value={value} index={3}>
         <Timeliner />
+      </CustomTabPanel>
+      <CustomTabPanel value={value} index={4}>
+        {id && <YaraScan evidenceId={id} />}
       </CustomTabPanel>
       <StixModule evidenceId={id} />
     </Box>

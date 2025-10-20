@@ -5,7 +5,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=${POSTGRES_DB}
-    image: postgres:14.1
+    image: postgres:alpine
     restart: always
     ports:
       - 5432:5432
@@ -14,7 +14,7 @@ services:
 
   volweb-redis:
     container_name: volweb-redis
-    image: "redis:latest"
+    image: "redis:alpine"
     restart: always
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -23,8 +23,9 @@ services:
       - "6379:6379"
 
   volweb-backend:
-    image: "forensicxlab/volweb-backend:latest"
-    container_name: volweb-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     environment:
       - DATABASE=${DATABASE}
       - DATABASE_HOST=${DATABASE_HOST}
@@ -48,8 +49,10 @@ services:
       - media:/home/app/web/media
 
   volweb-workers:
-    image: "forensicxlab/volweb-backend:latest"
-    container_name: volweb-workers
+    build:
+      context: ./backend
+      dockerfile: Dockerfile 
+      container_name: volweb-workers
     environment:
       - DATABASE=${DATABASE}
       - DATABASE_HOST=${DATABASE_HOST}
@@ -73,10 +76,12 @@ services:
       replicas: 1
 
   volweb-frontend:
-    image: "forensicxlab/volweb-frontend:latest"
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: volweb-frontend
-    expose:
-      - 3000
+    ports:
+      - "3000:3000"
     depends_on:
       - volweb-backend
     restart: always

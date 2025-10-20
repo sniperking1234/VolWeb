@@ -18,8 +18,12 @@ import Evidences from "./pages/evidences/Evidences";
 import Login from "./pages/auth/Login";
 import CaseDetail from "./pages/cases/CaseDetail";
 import Symbols from "./pages/symbols/Symbols";
+import Yararules from "./pages/yararules/Yararules";
+import Yararuleset from "./pages/yararulesets/Yararulesets";
+import YararulesetDetail from "./pages/yararulesets/YararulesetsDetail";
 import EvidenceDetail from "./pages/evidences/EvidenceDetails";
 import { SnackbarProvider } from "./components/SnackbarProvider";
+
 const darkTheme = createTheme({
   palette: {
     mode: "dark",
@@ -42,9 +46,9 @@ const App: React.FC = () => {
             path="/"
             element={
               <PrivateRoute>
-                <SnackbarProvider>
-                  <MiniDrawer />
-                </SnackbarProvider>
+              <SnackbarProvider>
+                <MiniDrawer />
+              </SnackbarProvider>
               </PrivateRoute>
             }
           >
@@ -52,8 +56,12 @@ const App: React.FC = () => {
             <Route path="cases" element={<Cases />} />
             <Route path="evidences" element={<Evidences />} />
             <Route path="symbols" element={<Symbols />} />
+            <Route path="yararules" element={<Yararules />} />
+            <Route path="yararulesets" element={<Yararuleset />} />
             <Route path="evidences/:id" element={<EvidenceDetail />} />
             <Route path="cases/:id" element={<CaseDetail />} />
+            <Route path="yararulesets/:id" element={<YararulesetDetail />} />
+
           </Route>
         </Routes>
       </Router>

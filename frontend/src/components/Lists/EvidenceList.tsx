@@ -251,6 +251,24 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       ),
       flex: 1,
     },
+    ...(!caseId ? [{
+      field: "linked_case_name",
+      headerName: "Case",
+      renderCell: (params: GridRenderCellParams) => (
+        <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+          <Work style={{ marginRight: 8 }} color="primary" />
+          <Chip
+            label={params.value || `Case #${params.row.linked_case}`}
+            color="primary"
+            variant="outlined"
+            size="small"
+            onClick={() => navigate(`/cases/${params.row.linked_case}`)}
+            style={{ cursor: 'pointer' }}
+          />
+        </div>
+      ),
+      flex: 0.8,
+    }] : []),
     {
       field: "os",
       headerName: "Operating System",

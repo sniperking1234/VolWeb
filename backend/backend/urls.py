@@ -10,7 +10,7 @@ from drf_yasg import openapi
 schema_view = get_schema_view(
    openapi.Info(
       title="VolWeb API",
-      default_version='v1',
+      default_version='v3',
       description="Documentation",
       terms_of_service="https://github.com/k1nd0ne/VolWeb/",
       contact=openapi.Contact(email="k1nd0ne@mail.com"),
@@ -30,4 +30,6 @@ urlpatterns = [
     path("api/", include("symbols.urls")),
     path("api/", include("volatility_engine.urls")),
     path("core/", include("core.urls")),
+    path("api/", include("yararulesets.urls")),
+    path("api/", include("yararules.urls")),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

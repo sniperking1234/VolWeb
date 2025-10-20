@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: volweb-postgresdb
-          image: postgres:14.1
+          image: postgres:alpine
           ports: [{ containerPort: 5432 }]
           envFrom:
             - secretRef: { name: volweb-secrets }
@@ -63,7 +63,7 @@ spec:
   ports: [{ protocol: TCP, port: 5432, targetPort: 5432 }]
 ---
 ################################################################################
-# 3.  Redis (unchanged – no env needed)
+# 3.  Redis
 ################################################################################
 apiVersion: apps/v1
 kind: Deployment
@@ -76,7 +76,7 @@ spec:
     spec:
       containers:
         - name: volweb-redis
-          image: redis:latest
+          image: redis:alpine
           command: ["redis-server", "--appendonly", "yes"]
           ports: [{ containerPort: 6379 }]
           volumeMounts:
@@ -242,7 +242,6 @@ data:
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
         location / {
-          # strip prefix before forwarding
           proxy_pass http://volweb-platform;
           proxy_set_header Host              $host;
           proxy_set_header X-Real-IP         $remote_addr;
@@ -253,6 +252,17 @@ data:
           proxy_set_header Upgrade           $http_upgrade;
           proxy_set_header Connection        $connection_upgrade;
           proxy_redirect off;
+        }
+
+        location /ws/ {
+          proxy_pass http://websocket;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection $connection_upgrade;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
         }
       }
     }
@@ -279,7 +289,7 @@ spec:
             secretName: volweb-tls
       containers:
         - name: nginx
-          image: nginx:1.25-alpine
+          image: nginx:mainline-alpine
           ports:
             - containerPort: 80
             - containerPort: 443

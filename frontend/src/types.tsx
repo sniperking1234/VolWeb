@@ -156,3 +156,24 @@ export interface Symbol {
   os: string;
   description: number;
 }
+
+export interface YaraRuleSet {
+  id: number;
+  name: string; 
+  description: string;
+  rules: YaraRule[];
+  status?: number;
+}
+
+export interface YaraRule {
+  id: number;
+  name: string;
+  rule_content: string;
+  description?: string;
+  linked_yararuleset: YaraRuleSet | null;  
+  status?: number;
+  is_active?: boolean;
+  etag?: string;
+  source?: string;
+  url?: string | null;
+}
