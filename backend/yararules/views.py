@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from .models import YaraRule
@@ -121,5 +122,25 @@ class YaraRuleViewSet(viewsets.ModelViewSet):
             logger.error(f"Error triggering recompilation: {e}")
             return Response(
                 {'error': f'Failed to start recompilation: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        Download a single YARA rule as .yar file
+        """
+        try:
+            rule = self.get_object()
+            
+            # Create the response with the rule content
+            response = HttpResponse(rule.rule_content, content_type='text/plain')
+            response['Content-Disposition'] = f'attachment; filename="{rule.name}.yar"'
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to download rule: {str(e)}'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

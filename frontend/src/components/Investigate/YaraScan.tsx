@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Box,
@@ -15,6 +14,7 @@ import {
   Alert,
   Chip,
   CircularProgress,
+  IconButton,
 } from "@mui/material";
 import Slide from "@mui/material/Slide";
 import { 
@@ -22,6 +22,7 @@ import {
   PlayArrow, 
   CheckCircle,
   Delete,
+  Close as CloseIcon,
 } from "@mui/icons-material";
 import { DataGrid, GridColDef, useGridApiRef } from "@mui/x-data-grid";
 import axiosInstance from "../../utils/axiosInstance";
@@ -55,7 +56,7 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
   const [processing, setProcessing] = useState(false);
   const [hasResults, setHasResults] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistory[]>([]);
-  const [currentScanId, setCurrentScanId] = useState<string | null>(null);
+  const [currentScanId, setCurrentScanId] = useState<string>("");
   const [transitioning, setTransitioning] = useState(false);
 
   const fetchYaraData = useCallback(async () => {
@@ -89,7 +90,6 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
         const scan = response.data[0];
         const description = scan.description || "";
         
-        // Extract scan type from description for display
         let scanName = "Latest YARA Scan";
         
         if (description.includes('using')) {
@@ -124,7 +124,7 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
         
         const backendHistory = [{
           id: "latest",
-          timestamp: new Date().toISOString(), // Use current time for display
+          timestamp: new Date().toISOString(),
           ruleset_name: scanName,
           results: scan.artefacts || [],
           description: description,
@@ -171,7 +171,6 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
       await deleteScan(scanHistory[0]);
     }
   }, [scanHistory, deleteScan]);
-
 
   const loadScanFromHistory = useCallback(async (scan: ScanHistory) => {
     setTransitioning(true);
@@ -267,7 +266,7 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
         ws.current.close();
       }
     };
-  }, [evidenceId, display_message]);
+  }, [evidenceId, loadScanHistoryFromBackend, display_message]);
 
   const handleRulesetToggle = (rulesetId: number) => {
     setSelectedRulesets((prev) =>
@@ -313,16 +312,118 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
     }, 300);
   };
 
-  const columns: GridColDef[] = scanResults[0]
-    ? Object.keys(scanResults[0])
-        .filter((key) => key !== "__children" && key !== "id")
-        .map((key) => ({
-          field: key,
-          headerName: key,
-          minWidth: 150,
-          flex: 1,
-        }))
-    : [];
+  // Helper function to decode hex string to readable text
+  const decodeHexString = (hexStr: string): string => {
+    if (!hexStr || typeof hexStr !== 'string') return '';
+    
+    try {
+      // Match pattern like b'\x00\x00=\x00' or similar
+      const matches = hexStr.match(/\\x([0-9a-fA-F]{2})/g);
+      if (!matches) return '';
+      
+      let result = '';
+      for (const match of matches) {
+        const hex = match.replace('\\x', '');
+        const charCode = parseInt(hex, 16);
+        // Only add printable ASCII characters
+        if (charCode >= 32 && charCode <= 126) {
+          result += String.fromCharCode(charCode);
+        } else if (charCode === 0) {
+          // Skip null bytes
+          continue;
+        } else {
+          result += '.';
+        }
+      }
+      return result || '(non-printable)';
+    } catch (e) {
+      return '(decode error)';
+    }
+  };
+
+  // DataGrid columns for scan results - same structure as PluginDataGrid
+  const resultColumns: GridColDef[] = useMemo(() => {
+    if (scanResults.length === 0) return [];
+    
+    const columns = Object.keys(scanResults[0])
+      .filter(key => key !== 'id' && key !== '__children')
+      .map(key => ({
+        field: key,
+        headerName: key,
+        flex: 1,
+        minWidth: 150,
+        renderCell: (params) => {
+          if (key === "File output" && params.value !== "Disabled") {
+            return (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => window.open(`/media/${evidenceId}/${params.value}`)}
+              >
+                Download
+              </Button>
+            );
+          }
+
+          if (key === "Disasm" || key === "Hexdump") {
+            return <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{params.value}</pre>;
+          }
+
+          return typeof params.value === "boolean" ? (
+            params.value ? (
+              <Checkbox checked={true} color="success" />
+            ) : (
+              <IconButton color="error">
+                <CloseIcon />
+              </IconButton>
+            )
+          ) : params.value !== null ? (
+            <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{params.value}</span>
+          ) : (
+            ""
+          );
+        },
+      }));
+    
+    // Add decoded value column after Value column
+    const valueIndex = columns.findIndex(col => col.field === 'Value');
+    if (valueIndex !== -1) {
+      columns.splice(valueIndex + 1, 0, {
+        field: 'DecodedValue',
+        headerName: 'Decoded Value',
+        flex: 1,
+        minWidth: 150,
+        renderCell: (params) => {
+          const valueField = params.row.Value;
+          const decoded = decodeHexString(valueField);
+          return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{decoded}</span>;
+        },
+      });
+    }
+    
+    return columns;
+  }, [scanResults, evidenceId]);
+
+  const autosizeOptions = useMemo(
+    () => ({
+      columns: [...resultColumns].map((col) => col.headerName ?? ""),
+      includeOutliers: true,
+      includeHeaders: true,
+    }),
+    [resultColumns],
+  );
+
+  // Add this useEffect to call autosizeColumns after the data is loaded
+  useEffect(() => {
+    if (!transitioning && scanResults.length > 0) {
+      const timeoutId = setTimeout(() => {
+        if (apiRef.current) {
+          apiRef.current.autosizeColumns(autosizeOptions);
+        }
+      }, 200);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [transitioning, scanResults, apiRef, autosizeOptions]);
 
   if (loading) {
     return (
@@ -381,20 +482,21 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
                 <Divider sx={{ mb: 2 }} />
                 
                 {rulesets.length === 0 ? (
-                  <Alert severity="info">No compiled rulesets available</Alert>
+                  <Alert severity="info">
+                    No compiled rulesets available. Please compile rulesets first.
+                  </Alert>
                 ) : (
-                  <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto" }}>
+                  <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto", p: 2 }}>
                     <List dense>
                       {rulesets.map((ruleset) => (
-                        <ListItem key={ruleset.id}>
+                        <ListItem key={ruleset.id} sx={{ py: 1 }}>
                           <Checkbox
-                            edge="start"
                             checked={selectedRulesets.includes(ruleset.id)}
                             onChange={() => handleRulesetToggle(ruleset.id)}
                           />
                           <ListItemText
                             primary={ruleset.name}
-                            secondary={ruleset.description || "No description"}
+                            secondary={`${ruleset.rules?.length || 0} rules`}
                           />
                           <CheckCircle color="success" fontSize="small" />
                         </ListItem>
@@ -429,20 +531,21 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
                 <Divider sx={{ mb: 2 }} />
                 
                 {rules.length === 0 ? (
-                  <Alert severity="info">No individual rules available</Alert>
+                  <Alert severity="info">
+                    No active individual rules available.
+                  </Alert>
                 ) : (
-                  <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto" }}>
+                  <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto", p: 2 }}>
                     <List dense>
                       {rules.map((rule) => (
-                        <ListItem key={rule.id}>
+                        <ListItem key={rule.id} sx={{ py: 1 }}>
                           <Checkbox
-                            edge="start"
                             checked={selectedRules.includes(rule.id)}
                             onChange={() => handleRuleToggle(rule.id)}
                           />
                           <ListItemText
                             primary={rule.name}
-                            secondary={`Ruleset: ${
+                            secondary={`${
                               rule.linked_yararuleset
                                 ? typeof rule.linked_yararuleset === 'object' && rule.linked_yararuleset !== null
                                     ? rule.linked_yararuleset.name 
@@ -509,17 +612,35 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
           </Box>
         </Box>
         
-        <div style={{ height: 600, width: "100%" }}>
+        <Box sx={{ height: "calc(100vh - 200px)", width: "100%" }}>
           <DataGrid
+            disableDensitySelector
+            showToolbar
             rows={scanResults.map((result, index) => ({ ...result, id: index }))}
-            columns={columns}
+            columns={resultColumns}
             density="compact"
+            sx={{ 
+              height: "100%",
+              '& .MuiDataGrid-cell': {
+                padding: '8px',
+                whiteSpace: 'normal',
+                wordWrap: 'break-word',
+                lineHeight: 'normal',
+              },
+              '& .MuiDataGrid-columnHeader': {
+                whiteSpace: 'normal',
+                lineHeight: 'normal',
+              }
+            }}
+            getRowId={(row) => row.id}
             pagination
+            loading={transitioning}
             autosizeOnMount
+            autosizeOptions={autosizeOptions}
             apiRef={apiRef}
             getRowHeight={() => "auto"}
           />
-        </div>
+        </Box>
       </Box>
     </Slide>
   );

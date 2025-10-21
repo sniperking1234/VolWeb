@@ -33,6 +33,7 @@ import { YaraRule, YaraRuleSet } from "../../types";
 import { useSnackbar } from "../SnackbarProvider";
 import YaraRuleCreationDialog from "../Dialogs/YaraRuleCreationDialog";
 import YaraRuleEditDialog from "../Dialogs/YaraRuleEditDialog";
+import { Download as DownloadIcon } from "@mui/icons-material";
 
 interface YaraRuleListProps {
   yararuleset?: YaraRuleSet;
@@ -231,6 +232,28 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     fetchYaraRules();
   };
 
+  const handleDownloadRule = async (ruleId: number, ruleName: string) => {
+  try {
+    const response = await axiosInstance.get(`/api/yararules/${ruleId}/download/`, {
+      responseType: 'blob'
+    });
+    
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${ruleName}.yar`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+    
+    display_message("success", "Rule downloaded successfully");
+  } catch (error) {
+    display_message("error", `Failed to download rule: ${error}`);
+  }
+};
+
   const columns: GridColDef[] = [
     {
       field: "name",
@@ -250,19 +273,6 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
           <Info style={{ marginRight: 8 }} />
           {params.value}
-        </div>
-      ),
-      flex: 1,
-    },
-    {
-      field: "rule_content",
-      headerName: "Rule Content",
-      renderCell: (params: GridRenderCellParams) => (
-        <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
-          <DataObject style={{ marginRight: 8 }} />
-          {params.value && params.value.length > 50 
-            ? `${params.value.substring(0, 50)}...` 
-            : params.value || 'No content'}
         </div>
       ),
       flex: 1,
@@ -381,6 +391,16 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
               <Visibility />
             </IconButton>
           </Tooltip>
+          <Tooltip title="Download Rule" placement="top">
+            <IconButton
+              edge="end"
+              aria-label="download"
+              onClick={() => handleDownloadRule(params.row.id, params.row.name)}
+              disabled={params.row.status !== 100}
+            >
+              <DownloadIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Restart compilation" placement="right">
             <IconButton
               edge="end"
@@ -407,33 +427,45 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     },
   ];
 
-  return (
-    <>
-      {/* FAB for uploading/importing rules */}
-      <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
-        <Fab
-          color="primary"
-          aria-label="upload"
-          onClick={() => {
-            setOpenCreationDialog(true);
-          }}
-          style={{ position: "fixed", bottom: "16px", right: "16px" }}
-        >
-          <CloudUploadIcon />
-        </Fab>
-      </Tooltip>
-      
-      {/* FAB for creating new rule from scratch */}
-      <Tooltip title="Create new YARA rule" placement="left">
-        <Fab
-          color="secondary"
-          aria-label="create"
-          onClick={handleNewRuleClick}
-          style={{ position: "fixed", bottom: "16px", right: "80px" }}
-        >
-          <CreateIcon />
-        </Fab>
-      </Tooltip>
+return (
+  <>
+    {/* FAB for uploading/importing rules */}
+    <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
+      <Fab
+        color="primary"
+        aria-label="upload"
+        onClick={() => {
+          setOpenCreationDialog(true);
+        }}
+        style={{ position: "fixed", bottom: 16, right: 16 }}
+      >
+        <CloudUploadIcon />
+      </Fab>
+    </Tooltip>
+    
+    {/* FAB for creating new rule from scratch */}
+    <Tooltip title="Create new YARA rule" placement="left">
+      <Fab
+        color="secondary"
+        aria-label="create"
+        onClick={handleNewRuleClick}
+        style={{ position: "fixed", bottom: 16, right: 80 }}
+      >
+        <CreateIcon />
+      </Fab>
+    </Tooltip>
+    
+    {/* FAB for deleting selected rules */}
+    {checked.length > 0 && (
+      <Fab
+        color="error"
+        aria-label="delete"
+        onClick={handleOpenDeleteMultipleDialog}
+        style={{ position: "fixed", bottom: 16, right: 144 }}
+      >
+        <DeleteIcon />
+      </Fab>
+    )}
       
       <YaraRuleEditDialog
         open={openViewDialog}

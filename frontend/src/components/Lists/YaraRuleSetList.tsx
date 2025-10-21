@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { DataGrid, GridColDef, GridRenderCellParams } from "@mui/x-data-grid";
+import { Download as DownloadIcon } from "@mui/icons-material";
 import {
   IconButton,
   Dialog,
@@ -196,6 +197,28 @@ function RulesetList() {
     }
   };
 
+  const handleDownloadRuleset = async (rulesetId: number, rulesetName: string) => {
+  try {
+    const response = await axiosInstance.get(`/api/yararulesets/${rulesetId}/download/`, {
+      responseType: 'blob'
+    });
+    
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${rulesetName}.yar`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+    
+    display_message("success", "Ruleset downloaded successfully");
+  } catch (error) {
+    display_message("error", `Failed to download ruleset: ${error}`);
+  }
+};
+
   const columns: GridColDef[] = [
     {
       field: "name",
@@ -294,6 +317,18 @@ function RulesetList() {
                 <Link />
               </IconButton>
             </Tooltip>	
+            <Tooltip title="Download Ruleset (.yar)" placement="top">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="download"
+                  onClick={() => handleDownloadRuleset(params.row.id, params.row.name)}
+                  disabled={params.row.status !== 100}
+                >
+                  <DownloadIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
             <Tooltip title="Restart compilation" placement="right">
               <IconButton
                 edge="end"

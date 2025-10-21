@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 import uuid
 import logging
 import hashlib
+from django.http import HttpResponse
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,46 @@ class YaraRuleSetViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_409_CONFLICT)
         except:
             return Response(status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        Download all rules in a ruleset as a single .yar file
+        """
+        try:
+            ruleset = self.get_object()
+            rules = YaraRule.objects.filter(linked_yararuleset=ruleset)
+            
+            if not rules.exists():
+                return Response(
+                    {'error': 'No rules found in this ruleset'}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Combine all rules into one file
+            content = f"// YARA Ruleset: {ruleset.name}\n"
+            content += f"// Description: {ruleset.description}\n"
+            content += f"// Total Rules: {rules.count()}\n"
+            content += f"// Generated: {ruleset.updated_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            for rule in rules:
+                content += f"// Rule: {rule.name}\n"
+                if rule.description:
+                    content += f"// Description: {rule.description}\n"
+                content += rule.rule_content
+                content += "\n\n"
+            
+            # Create the response
+            response = HttpResponse(content, content_type='text/plain')
+            response['Content-Disposition'] = f'attachment; filename="{ruleset.name}.yar"'
+            
+            return response
+            
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to download ruleset: {str(e)}'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class InitiateUploadView(APIView):
