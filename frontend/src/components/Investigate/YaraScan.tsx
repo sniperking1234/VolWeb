@@ -5,7 +5,7 @@ import {
   Button,
   Paper,
   Typography,
-  Grid2 as Grid,
+  Grid,
   List,
   ListItem,
   ListItemText,

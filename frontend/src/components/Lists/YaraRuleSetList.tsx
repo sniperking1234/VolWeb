@@ -331,8 +331,9 @@ function RulesetList() {
         rows={rulesetData}
         loading={!isConnected}
         checkboxSelection
-        onRowSelectionModelChange={(selection) => {
-          setChecked(selection as number[]);
+        onRowSelectionModelChange={(newSelection) => {
+          const selectedIds = Array.from(newSelection) as number[];
+          setSelectionModel(selectedIds);
         }}
       />
       <Fab

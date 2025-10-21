@@ -9,7 +9,7 @@ import {
   CardContent,
   Divider,
 } from "@mui/material";
-import Grid from "@mui/material/Grid2";
+import Grid from "@mui/material/Grid";
 import YaraRuleList from "../../components/Lists/YaraRuleList";
 import { useSnackbar } from "../../components/SnackbarProvider";
 const RulesetDetail: React.FC = () => {

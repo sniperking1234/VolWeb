@@ -32,6 +32,7 @@ import {
   Delete as DeleteIcon,
   RestartAlt,
   Fingerprint,
+  Work
 } from "@mui/icons-material";
 import BindEvidenceDialog from "../Dialogs/BindEvidenceDialog";
 import { Evidence } from "../../types";

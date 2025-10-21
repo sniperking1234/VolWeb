@@ -28,6 +28,7 @@
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-layout-noverlap": "^0.4.2",
     "graphology-types": "^0.24.8",
+    "@monaco-editor/react": "^4.6.0",
     "react": "^19.0.0",
     "react-apexcharts": "^1.6.0",
     "react-dom": "^19.0.0",
