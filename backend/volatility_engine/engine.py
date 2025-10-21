@@ -77,12 +77,12 @@ class VolatilityEngine:
         """
         with transaction.atomic():
             VolatilityPlugin.objects.filter(
-                evidence=self.evidence
+                evidence=self.obj
             ).delete()
             EnrichedProcess.objects.filter(
-                evidence=self.evidence
+                evidence=self.obj
             ).delete()
-        artefact_dir = Path(f"media/{self.evidence.id}")
+        artefact_dir = Path(f"media/{self.obj.id}")
         if artefact_dir.exists():
             shutil.rmtree(artefact_dir, ignore_errors=True)
         artefact_dir.mkdir(parents=True, exist_ok=True)

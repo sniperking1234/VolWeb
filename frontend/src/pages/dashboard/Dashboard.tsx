@@ -23,7 +23,7 @@ interface StatisticsData {
   total_cases: number;
   total_users: number;
   total_symbols: number;
-  total_yara_rules: number;
+  total_yararules: number;
   total_evidences_windows: number;
   total_evidences_linux: number;
   tasks: Array<{ date_created: string }>;
@@ -111,7 +111,7 @@ const Dashboard: React.FC = () => {
         <Grid size={2}>
           <StatisticsCard
             title="Yara Rules"
-            value={data.total_yara_rules}
+            value={data.total_yararules}
             icon={<BlurLinear fontSize="large" color="secondary" />}
           />
         </Grid>

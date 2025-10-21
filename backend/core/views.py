@@ -11,6 +11,7 @@ from cases.models import Case
 from cases.serializers import CaseSerializer
 from evidences.models import Evidence
 from symbols.models import Symbol
+from yararules.models import YaraRule
 from symbols.serializers import SymbolSerializer
 from core.serializers import IndicatorSerializer, TasksSerializer
 from django_celery_results.models import TaskResult
@@ -138,7 +139,7 @@ class StatisticsApiView(APIView):
         total_evidences_windows = Evidence.objects.filter(os="windows").count()
         total_evidences_linux = Evidence.objects.filter(os="linux").count()
         total_symbols = Symbol.objects.count()
-        total_yararules = 0  ##TODO: Add YaraRule model count when implemented
+        total_yararules = YaraRule.objects.count()
         total_users = User.objects.count()
         last_5_cases = Case.objects.all()[:5]
         last_5_isf = Symbol.objects.all()[:5]

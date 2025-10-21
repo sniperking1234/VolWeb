@@ -45,6 +45,9 @@ echo "Migrations completed successfully!"
 echo "Collecting static files..."
 python manage.py collectstatic --noinput --verbosity=2
 
+echo "Creating admin user if not exists..."
+python manage.py initadmin
+
 echo "=== ENTRYPOINT COMPLETED ==="
 
 exec "$@"
