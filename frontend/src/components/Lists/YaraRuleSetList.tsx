@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { DataGrid, GridColDef, GridRenderCellParams } from "@mui/x-data-grid";
+import { DataGrid, GridColDef, GridRenderCellParams, GridRowSelectionModel } from "@mui/x-data-grid";
 import { Download as DownloadIcon } from "@mui/icons-material";
 import {
   IconButton,
@@ -31,7 +31,10 @@ import { useSnackbar } from "../SnackbarProvider";
 
 function RulesetList() {
   const navigate = useNavigate();
-  const [checked, setChecked] = useState<number[]>([]);
+  const { display_message } = useSnackbar();
+
+  const [selectionModel, setSelectionModel] = useState<GridRowSelectionModel>({ type: "include", ids: new Set<number>() });
+
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedRuleset, setSelectedRuleset] = useState<YaraRuleSet | null>(null);
   const [openRestartDialog, setOpenRestartDialog] = useState<boolean>(false);
@@ -39,7 +42,6 @@ function RulesetList() {
   const [rulesetData, setRulesetData] = useState<YaraRuleSet[]>([]);
   const [deleteMultiple, setDeleteMultiple] = useState(false);
 
-  const { display_message } = useSnackbar();
   const [isConnected, setIsConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
   const retryInterval = useRef<number | null>(null);
@@ -73,70 +75,62 @@ function RulesetList() {
       ws.current.onmessage = (event) => {
         const data = JSON.parse(event.data);
         const status = data.status;
-        const message = data.message;
+        const message: YaraRuleSet = data.message;
 
         if (status === "created") {
           setRulesetData((prevData) => {
-            const exists = prevData.some(
-              (rulesetItem) => rulesetItem.id === message.id,
-            );
-            if (exists) {
-              return prevData.map((rulesetItem) =>
-                rulesetItem.id === message.id ? message : rulesetItem,
-              );
-            } else {
-              return [...prevData, message];
-            }
+            const exists = prevData.some((item) => item.id === message.id);
+            return exists ? prevData.map((item) => (item.id === message.id ? message : item)) : [...prevData, message];
           });
         } else if (status === "updated") {
-          setRulesetData((prevData) =>
-            prevData.map((rulesetItem) =>
-              rulesetItem.id === message.id ? message : rulesetItem,
-            ),
-          );
+          setRulesetData((prevData) => prevData.map((item) => (item.id === message.id ? message : item)));
         } else if (status === "deleted") {
-          setRulesetData((prevData) =>
-            prevData.filter((rulesetItem) => rulesetItem.id !== message.id),
-          );
-          setChecked([]);
+          setRulesetData((prevData) => prevData.filter((item) => item.id !== message.id));
+          setSelectionModel((prev) => ({
+            type: "include",
+            ids: new Set([...prev.ids].filter((id) => id !== message.id)),
+          }));
         }
       };
 
-      ws.current.onerror = (error) => {
-        console.log("WebSocket error:", error);
-      };
+      ws.current.onerror = (error) => console.log("WebSocket error:", error);
     };
 
     connectWebSocket();
 
     axiosInstance
       .get("/api/yararulesets/")
-      .then((response) => {
-        setRulesetData(response.data);
-      })
-      .catch((error) => {
+      .then((res) => setRulesetData(res.data))
+      .catch((err) => {
         display_message("error", "Error fetching the ruleset data.");
-        console.error("Error fetching ruleset data:", error);
+        console.error(err);
       });
 
     return () => {
-      if (ws.current) {
-        ws.current.close();
-      }
-      if (retryInterval.current) {
-        clearTimeout(retryInterval.current);
-      }
+      if (ws.current) ws.current.close();
+      if (retryInterval.current) clearTimeout(retryInterval.current);
     };
   }, [display_message]);
 
-  const handleCreateSuccess = () => {
-    display_message("success", "Ruleset created.");
-  };
+  const handleCreateSuccess = () => display_message("success", "Ruleset created.");
 
   const handleDeleteClick = (row: YaraRuleSet) => {
     setSelectedRuleset(row);
     setOpenDialog(true);
     setDeleteMultiple(false);
+  };
+
+  const handleDeleteSelected = async () => {
+    try {
+      const selectedIds = [...selectionModel.ids] as number[];
+      await Promise.all(selectedIds.map((id) => axiosInstance.delete(`/api/yararulesets/${id}/`)));
+      display_message("success", "Selected rulesets deleted.");
+      setSelectionModel({ type: "include", ids: new Set() });
+    } catch {
+      display_message("error", "Error deleting selected rulesets");
+    } finally {
+      setOpenDialog(false);
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -150,23 +144,7 @@ function RulesetList() {
         setOpenDialog(false);
         setSelectedRuleset(null);
       }
-    } else if (deleteMultiple) {
-      handleDeleteSelected();
-    }
-  };
-
-  const handleDeleteSelected = async () => {
-    try {
-      await Promise.all(
-        checked.map((id) => axiosInstance.delete(`/api/yararulesets/${id}/`)),
-      );
-      display_message("success", "Selected rulesets deleted.");
-      setChecked([]);
-    } catch {
-      display_message("error", "Error deleting selected rulesets");
-    } finally {
-      setOpenDialog(false);
-    }
+    } else if (deleteMultiple) handleDeleteSelected();
   };
 
   const handleOpenDeleteMultipleDialog = () => {
@@ -174,9 +152,7 @@ function RulesetList() {
     setOpenDialog(true);
   };
 
-  const handleToggle = (id: number) => {
-    navigate(`/yararulesets/${id}`);
-  };
+  const handleToggle = (id: number) => navigate(`/yararulesets/${id}`);
 
   const handleRestartClick = (row: YaraRuleSet) => {
     setSelectedRuleset(row);
@@ -185,9 +161,8 @@ function RulesetList() {
 
   const handleConfirmRestart = async () => {
     if (selectedRuleset) {
-      const id: number = selectedRuleset.id;
       try {
-        await axiosInstance.post(`/api/yararulesets/tasks/restart/`, { id });
+        await axiosInstance.post(`/api/yararulesets/tasks/restart/`, { id: selectedRuleset.id });
         display_message("success", "Compiling restarted");
       } catch (error) {
         display_message("error", `Error restarting the compilation: ${error}`);
@@ -198,26 +173,21 @@ function RulesetList() {
   };
 
   const handleDownloadRuleset = async (rulesetId: number, rulesetName: string) => {
-  try {
-    const response = await axiosInstance.get(`/api/yararulesets/${rulesetId}/download/`, {
-      responseType: 'blob'
-    });
-    
-    // Create download link
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${rulesetName}.yar`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-    
-    display_message("success", "Ruleset downloaded successfully");
-  } catch (error) {
-    display_message("error", `Failed to download ruleset: ${error}`);
-  }
-};
+    try {
+      const response = await axiosInstance.get(`/api/yararulesets/${rulesetId}/download/`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${rulesetName}.yar`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      display_message("success", "Ruleset downloaded successfully");
+    } catch (error) {
+      display_message("error", `Failed to download ruleset: ${error}`);
+    }
+  };
 
   const columns: GridColDef[] = [
     {
@@ -237,7 +207,7 @@ function RulesetList() {
       renderCell: (params: GridRenderCellParams) => (
         <div style={{ display: "flex", alignItems: "center" }}>
           <Info style={{ marginRight: 8 }} />
-          {params.value || 'No description'}
+          {params.value || "No description"}
         </div>
       ),
       flex: 2,
@@ -245,59 +215,15 @@ function RulesetList() {
     {
       field: "status",
       headerName: "Status",
-      renderCell: (params: GridRenderCellParams) =>
-        params.value === 100 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Compiled"
-              size="small"
-              color="success"
-              variant="outlined"
-            />
-          </div>
-        ) : params.value === -1 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="No active rules"
-              size="small"
-              color="warning"
-              variant="outlined"
-            />
-          </div>
-        ) : params.value === -2 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="No valid rules"
-              size="small"
-              color="warning"
-              variant="outlined"
-            />
-          </div>
-        ) : params.value === -3 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Error compiling"
-              size="small"
-              color="error"
-              variant="outlined"
-            />
-          </div>
-        ) : 
-        (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <LinearProgressBar value={Number(params.value)} />
-          </div>
-        ),
+      renderCell: (params: GridRenderCellParams) => {
+        const value = params.value;
+        if (value === 100)
+          return <Chip label="Compiled" size="small" color="success" variant="outlined" />;
+        if (value === -1) return <Chip label="No active rules" size="small" color="warning" variant="outlined" />;
+        if (value === -2) return <Chip label="No valid rules" size="small" color="warning" variant="outlined" />;
+        if (value === -3) return <Chip label="Error compiling" size="small" color="error" variant="outlined" />;
+        return <LinearProgressBar value={Number(value)} />;
+      },
       flex: 1,
     },
     {
@@ -305,47 +231,27 @@ function RulesetList() {
       headerName: "Actions",
       renderCell: (params: GridRenderCellParams) => {
         const isCompiling = params.row.status > 0 && params.row.status < 100;
-        
         return (
           <>
             <Tooltip title="View Ruleset">
-              <IconButton
-                edge="end"
-                aria-label="open"
-                onClick={() => handleToggle(params.row.id)}
-              >
+              <IconButton onClick={() => handleToggle(params.row.id)}>
                 <Link />
               </IconButton>
-            </Tooltip>	
-            <Tooltip title="Download Ruleset (.yar)" placement="top">
+            </Tooltip>
+            <Tooltip title="Download Ruleset (.yar)">
               <span>
-                <IconButton
-                  edge="end"
-                  aria-label="download"
-                  onClick={() => handleDownloadRuleset(params.row.id, params.row.name)}
-                  disabled={params.row.status !== 100}
-                >
+                <IconButton onClick={() => handleDownloadRuleset(params.row.id, params.row.name)} disabled={params.row.status !== 100}>
                   <DownloadIcon />
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title="Restart compilation" placement="right">
-              <IconButton
-                edge="end"
-                aria-label="restart"
-                onClick={() => handleRestartClick(params.row)}
-                disabled={isCompiling}
-              >
+            <Tooltip title="Restart compilation">
+              <IconButton onClick={() => handleRestartClick(params.row)} disabled={isCompiling}>
                 <RestartAlt />
               </IconButton>
             </Tooltip>
             <Tooltip title="Delete Ruleset">
-              <IconButton
-                edge="end"
-                aria-label="delete"
-                onClick={() => handleDeleteClick(params.row)}
-                disabled={isCompiling}
-              >
+              <IconButton onClick={() => handleDeleteClick(params.row)} disabled={isCompiling}>
                 <DeleteSweep />
               </IconButton>
             </Tooltip>
@@ -366,80 +272,42 @@ function RulesetList() {
         rows={rulesetData}
         loading={!isConnected}
         checkboxSelection
-        onRowSelectionModelChange={(newSelection) => {
-          const selectionIterable = newSelection as unknown as Iterable<number>;
-          const selectedIds = [...selectionIterable].map(id => Number(id));
-          setChecked(selectedIds);
-        }}
+        disableRowSelectionExcludeModel
+        rowSelectionModel={selectionModel}
+        onRowSelectionModelChange={(newSelection) => setSelectionModel(newSelection)}
       />
-      <Fab
-        color="primary"
-        aria-label="add"
-        style={{ position: "fixed", bottom: 16, right: 16 }}
-        onClick={() => setRulesetDialogOpen(true)}
-      >
+
+      <Fab color="primary" aria-label="add" style={{ position: "fixed", bottom: 16, right: 16 }} onClick={() => setRulesetDialogOpen(true)}>
         <AddIcon />
       </Fab>
-      {checked.length > 0 && (
-        <Fab
-          color="secondary"
-          aria-label="delete"
-          style={{ position: "fixed", bottom: 90, right: 16 }}
-          onClick={handleOpenDeleteMultipleDialog}
-        >
+
+      {selectionModel.ids.size > 0 && (
+        <Fab color="secondary" aria-label="delete" style={{ position: "fixed", bottom: 90, right: 16 }} onClick={handleOpenDeleteMultipleDialog}>
           <DeleteIcon />
         </Fab>
       )}
-      <AddRuleSetDialog
-        open={rulesetDialogOpen}
-        onClose={() => setRulesetDialogOpen(false)}
-        onCreateSuccess={handleCreateSuccess}
-      />
-      <Dialog
-        open={openDialog}
-        onClose={() => setOpenDialog(false)}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
-      >
-        <DialogTitle id="alert-dialog-title">{`Delete ${
-          deleteMultiple ? "Selected Rulesets" : "Ruleset"
-        }`}</DialogTitle>
+
+      <AddRuleSetDialog open={rulesetDialogOpen} onClose={() => setRulesetDialogOpen(false)} onCreateSuccess={handleCreateSuccess} />
+
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)}>
+        <DialogTitle>{`Delete ${deleteMultiple ? "Selected Rulesets" : "Ruleset"}`}</DialogTitle>
         <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            {`Are you sure you want to delete ${
-              deleteMultiple ? "these rulesets" : "this ruleset"
-            }?`}
-          </DialogContentText>
+          <DialogContentText>{`Are you sure you want to delete ${deleteMultiple ? "these rulesets" : "this ruleset"}?`}</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDialog(false)} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmDelete} color="primary" autoFocus>
-            Yes
-          </Button>
+          <Button onClick={() => setOpenDialog(false)} color="primary">Cancel</Button>
+          <Button onClick={handleConfirmDelete} color="primary" autoFocus>Yes</Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={openRestartDialog}
-        onClose={() => setOpenRestartDialog(false)}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
-      >
-        <DialogTitle id="alert-dialog-title">Restart the compilation</DialogTitle>
+      <Dialog open={openRestartDialog} onClose={() => setOpenRestartDialog(false)}>
+        <DialogTitle>Restart the compilation</DialogTitle>
         <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            You are about to restart the compilation, confirm ?
-          </DialogContentText>
+          <DialogContentText>You are about to restart the compilation, confirm?</DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenRestartDialog(false)} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmRestart} color="primary" autoFocus>
-            Restart
-          </Button>
+          <Button onClick={() => setOpenRestartDialog(false)} color="primary">Cancel</Button>
+          <Button onClick={handleConfirmRestart} color="primary" autoFocus>Restart</Button>
         </DialogActions>
       </Dialog>
     </>

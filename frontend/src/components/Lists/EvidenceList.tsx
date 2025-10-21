@@ -192,7 +192,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
   };
 
   const selectedIds = [...selectionModel.ids] as number[];
-
   const handleConfirmDelete = async () => {
     if (selectedEvidence && !deleteMultiple) {
       try {
@@ -416,18 +415,7 @@ function EvidenceList({ caseId }: EvidenceListProps) {
         onBindSuccess={handleBindSuccess}
         caseId={caseId}
       />
-      <DataGrid
-        rowHeight={40}
-        disableRowSelectionOnClick
-        rows={evidenceData}
-        columns={columns}
-        loading={!isConnected}
-        checkboxSelection
-        rowSelectionModel={selectionModel}
-        onRowSelectionModelChange={(newSelection) =>
-          setSelectionModel(newSelection as GridRowSelectionModel)
-        }
-      />
+
       {selectedIds.length > 0 && (
         <Fab
           color="secondary"
@@ -463,7 +451,20 @@ function EvidenceList({ caseId }: EvidenceListProps) {
           </Button>
         </DialogActions>
       </Dialog>
-
+      <DataGrid
+        rowHeight={40}
+        disableRowSelectionOnClick
+        rows={evidenceData}
+        columns={columns}
+        loading={!isConnected}
+        pagination
+        disableRowSelectionExcludeModel
+        checkboxSelection
+        rowSelectionModel={selectionModel}
+        onRowSelectionModelChange={(newSelection) => 
+          setSelectionModel(newSelection)
+        }
+      />
       <Dialog
         open={openRestartDialog}
         onClose={() => setOpenRestartDialog(false)}

@@ -41,7 +41,6 @@ def send_yara_rule_deleted(sender, instance, **kwargs):
         'name': instance.name,
         'status': instance.status,
         'is_active': instance.is_active,
-        # Don't try to access linked_yararuleset as it might be deleted
         'linked_yararuleset': None
     }
     

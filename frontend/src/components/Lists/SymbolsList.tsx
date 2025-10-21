@@ -258,6 +258,7 @@ function SymbolsList() {
         columns={columns}
         loading={!isConnected}
         checkboxSelection
+        disableRowSelectionExcludeModel
         rowSelectionModel={selectionModel}
         onRowSelectionModelChange={(newSelection) =>
           setSelectionModel(newSelection as GridRowSelectionModel)

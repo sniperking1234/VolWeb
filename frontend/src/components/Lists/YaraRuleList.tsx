@@ -1,5 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { DataGrid, GridColDef, GridRenderCellParams } from "@mui/x-data-grid";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  DataGrid,
+  GridColDef,
+  GridRenderCellParams,
+  GridRowSelectionModel,
+} from "@mui/x-data-grid";
 import {
   Button,
   Chip,
@@ -26,6 +31,7 @@ import {
   Fingerprint,
   CloudUpload as CloudUploadIcon,
   Create as CreateIcon,
+  Download as DownloadIcon,
 } from "@mui/icons-material";
 import LinearProgressBar from "../LinearProgressBar";
 import axiosInstance from "../../utils/axiosInstance";
@@ -33,7 +39,6 @@ import { YaraRule, YaraRuleSet } from "../../types";
 import { useSnackbar } from "../SnackbarProvider";
 import YaraRuleCreationDialog from "../Dialogs/YaraRuleCreationDialog";
 import YaraRuleEditDialog from "../Dialogs/YaraRuleEditDialog";
-import { Download as DownloadIcon } from "@mui/icons-material";
 
 interface YaraRuleListProps {
   yararuleset?: YaraRuleSet;
@@ -44,37 +49,51 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [yararuleData, setYararuleData] = useState<YaraRule[]>([]);
   const [allYaraRuleSets, setAllYaraRuleSets] = useState<YaraRuleSet[]>([]);
-  const [checked, setChecked] = useState<number[]>([]);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openRestartDialog, setOpenRestartDialog] = useState(false);
   const [openViewDialog, setOpenViewDialog] = useState(false);
   const [openCreationDialog, setOpenCreationDialog] = useState(false);
   const [openNewRuleDialog, setOpenNewRuleDialog] = useState(false);
-  const [selectedYaraRule, setSelectedYaraRule] = useState<YaraRule | null>(null);
+  const [selectedYaraRule, setSelectedYaraRule] = useState<YaraRule | null>(
+    null
+  );
   const [deleteMultiple, setDeleteMultiple] = useState(false);
-  const [yaraRuleToDelete, setYaraRuleToDelete] = useState<YaraRule | null>(null);
-  const [yaraRuleToRestart, setYaraRuleToRestart] = useState<YaraRule | null>(null);
+  const [yaraRuleToDelete, setYaraRuleToDelete] = useState<YaraRule | null>(
+    null
+  );
+  const [yaraRuleToRestart, setYaraRuleToRestart] = useState<YaraRule | null>(
+    null
+  );
+
+  const ws = useRef<WebSocket | null>(null);
+  const retryInterval = useRef<number | null>(null);
+
+  const [selectionModel, setSelectionModel] =
+    useState<GridRowSelectionModel>({
+      type: "include",
+      ids: new Set<number>(),
+    });
+
+  const selectedIds = [...(selectionModel as any).ids] as number[];
 
   useEffect(() => {
     const fetchYaraRules = async () => {
       try {
         const response = await axiosInstance.get("/api/yararules/");
-        const data = response.data;
-        
-        const yaraRulesUpdated = data.map((d: YaraRule) => ({
+        const data: YaraRule[] = response.data;
+        const yaraRulesUpdated = data.map((d) => ({
           ...d,
           ruleset_name: d.linked_yararuleset?.name || "No ruleset",
         }));
 
         if (yararuleset) {
-          const filteredData = yaraRulesUpdated.filter(
-            (rule: YaraRule) => {
-              const rulesetId = typeof rule.linked_yararuleset === 'object' 
-                ? rule.linked_yararuleset?.id 
-                : rule.linked_yararuleset;
-              return rulesetId === yararuleset.id;
-            }
-          );
+          const filteredData = yaraRulesUpdated.filter((rule: YaraRule) => {
+            const rulesetId =
+              typeof rule.linked_yararuleset === "object"
+                ? rule.linked_yararuleset?.id
+                : (rule.linked_yararuleset as unknown as number) || null;
+            return rulesetId === yararuleset.id;
+          });
           setYararuleData(filteredData);
         } else {
           setYararuleData(yaraRulesUpdated);
@@ -99,6 +118,74 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     fetchAllRuleSets();
   }, [yararuleset]);
 
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const port = window.location.port ? `:${window.location.port}` : "";
+    const wsUrl = `${protocol}://${window.location.hostname}${port}/ws/yararules/`;
+
+    const connectWebSocket = () => {
+      ws.current = new WebSocket(wsUrl);
+
+      ws.current.onopen = () => {
+        console.log("WebSocket connected (yararules)");
+        setIsConnected(true);
+        if (retryInterval.current) {
+          clearInterval(retryInterval.current);
+          retryInterval.current = null;
+        }
+      };
+
+      ws.current.onclose = () => {
+        console.log("WebSocket disconnected (yararules)");
+        setIsConnected(false);
+        if (!retryInterval.current) {
+          retryInterval.current = window.setTimeout(connectWebSocket, 5000);
+          console.log("Attempting to reconnect to WebSocket (yararules)...");
+        }
+      };
+
+      ws.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const status = data.status;
+          const message: YaraRule = data.message;
+
+          if (status === "created" || status === "updated") {
+            setYararuleData((prevData) => {
+              const exists = prevData.some((r) => r.id === message.id);
+              if (exists) {
+                return prevData.map((r) => (r.id === message.id ? message : r));
+              } else {
+                return [...prevData, message];
+              }
+            });
+          } else if (status === "deleted") {
+            setYararuleData((prevData) =>
+              prevData.filter((r) => r.id !== message.id)
+            );
+            setSelectionModel((prev: any) => ({
+              type: "include",
+              ids: new Set([...prev.ids].filter((id: number) => id !== message.id)),
+            }));
+          }
+        } catch (err) {
+          console.error("Failed to parse WS message (yararules):", err);
+        }
+      };
+
+      ws.current.onerror = (error) => {
+        console.error("WebSocket error (yararules):", error);
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (ws.current) ws.current.close();
+      if (retryInterval.current) clearInterval(retryInterval.current);
+    };
+  }, []);
+
   const handleDeleteClick = (row: YaraRule) => {
     setYaraRuleToDelete(row);
     setDeleteMultiple(false);
@@ -119,7 +206,9 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     if (!yaraRuleToRestart) return;
 
     try {
-      await axiosInstance.post(`/api/yararules/${yaraRuleToRestart.id}/recompile/`);
+      await axiosInstance.post(
+        `/api/yararules/${yaraRuleToRestart.id}/recompile/`
+      );
       display_message("success", "Compilation restarted");
     } catch (error) {
       display_message("error", `Failed to restart compilation: ${error}`);
@@ -131,41 +220,40 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   const handleConfirmDelete = async () => {
     try {
       if (deleteMultiple) {
-        for (const id of checked) {
-          await axiosInstance.delete(`/api/yararules/${id}/`);
-        }
+        const idsToDelete = [...(selectionModel as any).ids] as number[];
+        await Promise.all(
+          idsToDelete.map((id) => axiosInstance.delete(`/api/yararules/${id}/`))
+        );
         display_message("success", "Selected yara rules deleted successfully");
+        setSelectionModel({ type: "include", ids: new Set<number>() });
       } else if (yaraRuleToDelete) {
         await axiosInstance.delete(`/api/yararules/${yaraRuleToDelete.id}/`);
         display_message("success", "Yara rule deleted successfully");
       }
 
       const response = await axiosInstance.get("/api/yararules/");
-      const data = response.data;
-      const yaraRulesUpdated = data.map((d: YaraRule) => ({
+      const data: YaraRule[] = response.data;
+      const yaraRulesUpdated = data.map((d) => ({
         ...d,
         ruleset_name: d.linked_yararuleset?.name || "No ruleset",
       }));
 
       if (yararuleset) {
-        const filteredData = yaraRulesUpdated.filter(
-          (rule: YaraRule) => {
-            // Compare by ID to handle both object and ID references
-            const rulesetId = typeof rule.linked_yararuleset === 'object' 
-              ? rule.linked_yararuleset?.id 
-              : rule.linked_yararuleset;
-            return rulesetId === yararuleset.id;
-          }
-        );
+        const filteredData = yaraRulesUpdated.filter((rule: YaraRule) => {
+          const rulesetId =
+            typeof rule.linked_yararuleset === "object"
+              ? rule.linked_yararuleset?.id
+              : (rule.linked_yararuleset as unknown as number) || null;
+          return rulesetId === yararuleset.id;
+        });
         setYararuleData(filteredData);
       } else {
         setYararuleData(yaraRulesUpdated);
       }
-      setChecked([]);
     } catch (error) {
       display_message(
         "error",
-        `Error deleting the selected yara rule: ${error}`,
+        `Error deleting the selected yara rule: ${String(error)}`
       );
     } finally {
       setOpenDeleteDialog(false);
@@ -178,15 +266,14 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   };
 
   const handleNewRuleClick = () => {
-    // Create a new empty rule for the editor
     const newRule: YaraRule = {
-      id: 0, // Will be assigned by backend
+      id: 0,
       name: "new_rule",
       rule_content: `rule new_rule {
     meta:
         description = "New YARA rule"
         author = ""
-        date = "${new Date().toISOString().split('T')[0]}"
+        date = "${new Date().toISOString().split("T")[0]}"
     
     strings:
         $string1 = "example"
@@ -199,26 +286,28 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
       status: 0,
       is_active: true,
     };
-    
+
     setSelectedYaraRule(newRule);
     setOpenNewRuleDialog(true);
   };
 
   const handleUpdateSuccess = (updatedRule: YaraRule) => {
-    // Refresh the data after successful update
     const fetchYaraRules = async () => {
       try {
         const response = await axiosInstance.get("/api/yararules/");
-        const data = response.data;
-
-        const yaraRulesUpdated = data.map((d: YaraRule) => ({
+        const data: YaraRule[] = response.data;
+        const yaraRulesUpdated = data.map((d) => ({
           ...d,
           ruleset_name: d.linked_yararuleset?.name || "No ruleset",
         }));
 
         if (yararuleset) {
           const filteredData = yaraRulesUpdated.filter(
-            (rule: YaraRule) => rule.linked_yararuleset?.id === yararuleset.id
+            (rule: YaraRule) =>
+              (typeof rule.linked_yararuleset === "object"
+                ? rule.linked_yararuleset?.id
+                : (rule.linked_yararuleset as unknown as number) || null) ===
+              yararuleset.id
           );
           setYararuleData(filteredData);
         } else {
@@ -233,26 +322,28 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   };
 
   const handleDownloadRule = async (ruleId: number, ruleName: string) => {
-  try {
-    const response = await axiosInstance.get(`/api/yararules/${ruleId}/download/`, {
-      responseType: 'blob'
-    });
-    
-    // Create download link
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${ruleName}.yar`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-    
-    display_message("success", "Rule downloaded successfully");
-  } catch (error) {
-    display_message("error", `Failed to download rule: ${error}`);
-  }
-};
+    try {
+      const response = await axiosInstance.get(
+        `/api/yararules/${ruleId}/download/`,
+        {
+          responseType: "blob",
+        }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${ruleName}.yar`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      display_message("success", "Rule downloaded successfully");
+    } catch (error) {
+      display_message("error", `Failed to download rule: ${error}`);
+    }
+  };
 
   const columns: GridColDef[] = [
     {
@@ -314,64 +405,27 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
       headerName: "Status",
       renderCell: (params: GridRenderCellParams) =>
         params.value === 100 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Compiled"
-              size="small"
-              color="success"
-              variant="outlined"
-            />
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Chip label="Compiled" size="small" color="success" variant="outlined" />
           </div>
         ) : params.value === -1 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Empty content"
-              size="small"
-              color="warning"
-              variant="outlined"
-            />
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Chip label="Empty content" size="small" color="warning" variant="outlined" />
           </div>
         ) : params.value === -2 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Syntax error"
-              size="small"
-              color="error"
-              variant="outlined"
-            />
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Chip label="Syntax error" size="small" color="error" variant="outlined" />
           </div>
         ) : params.value === -3 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Error compiling"
-              size="small"
-              color="error"
-              variant="outlined"
-            />
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Chip label="Error compiling" size="small" color="error" variant="outlined" />
           </div>
         ) : params.value === -4 ? (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
-            <Chip
-              label="Generic error"
-              size="small"
-              color="error"
-              variant="outlined"
-            />
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Chip label="Generic error" size="small" color="error" variant="outlined" />
           </div>
         ) : (
-          <div
-            style={{ display: "flex", alignItems: "center", height: "100%" }}
-          >
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
             <LinearProgressBar value={Number(params.value)} />
           </div>
         ),
@@ -383,11 +437,7 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
       renderCell: (params: GridRenderCellParams) => (
         <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
           <Tooltip title="View/Edit Rule" placement="right">
-            <IconButton
-              edge="end"
-              aria-label="view"
-              onClick={() => handleViewClick(params.row)}
-            >
+            <IconButton edge="end" aria-label="view" onClick={() => handleViewClick(params.row)}>
               <Visibility />
             </IconButton>
           </Tooltip>
@@ -427,46 +477,34 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     },
   ];
 
-return (
-  <>
-    {/* FAB for uploading/importing rules */}
-    <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
-      <Fab
-        color="primary"
-        aria-label="upload"
-        onClick={() => {
-          setOpenCreationDialog(true);
-        }}
-        style={{ position: "fixed", bottom: 16, right: 16 }}
-      >
-        <CloudUploadIcon />
-      </Fab>
-    </Tooltip>
-    
-    {/* FAB for creating new rule from scratch */}
-    <Tooltip title="Create new YARA rule" placement="left">
-      <Fab
-        color="secondary"
-        aria-label="create"
-        onClick={handleNewRuleClick}
-        style={{ position: "fixed", bottom: 16, right: 80 }}
-      >
-        <CreateIcon />
-      </Fab>
-    </Tooltip>
-    
-    {/* FAB for deleting selected rules */}
-    {checked.length > 0 && (
-      <Fab
-        color="error"
-        aria-label="delete"
-        onClick={handleOpenDeleteMultipleDialog}
-        style={{ position: "fixed", bottom: 16, right: 144 }}
-      >
-        <DeleteIcon />
-      </Fab>
-    )}
-      
+  return (
+    <>
+      {/* FAB: upload/import */}
+      <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
+        <Fab
+          color="primary"
+          aria-label="upload"
+          onClick={() => {
+            setOpenCreationDialog(true);
+          }}
+          style={{ position: "fixed", bottom: 16, right: 16 }}
+        >
+          <CloudUploadIcon />
+        </Fab>
+      </Tooltip>
+
+      {/* FAB: create new rule */}
+      <Tooltip title="Create new YARA rule" placement="left">
+        <Fab
+          color="secondary"
+          aria-label="create"
+          onClick={handleNewRuleClick}
+          style={{ position: "fixed", bottom: 16, right: 80 }}
+        >
+          <CreateIcon />
+        </Fab>
+      </Tooltip>
+
       <YaraRuleEditDialog
         open={openViewDialog}
         onClose={() => setOpenViewDialog(false)}
@@ -474,8 +512,7 @@ return (
         onUpdateSuccess={handleUpdateSuccess}
         yaraRuleSets={allYaraRuleSets}
       />
-      
-      {/* Dialog for creating new rule from scratch */}
+
       <YaraRuleEditDialog
         open={openNewRuleDialog}
         onClose={() => setOpenNewRuleDialog(false)}
@@ -487,7 +524,7 @@ return (
         }}
         yaraRuleSets={allYaraRuleSets}
       />
-      
+
       <YaraRuleCreationDialog
         open={openCreationDialog}
         onClose={() => {
@@ -503,22 +540,22 @@ return (
         }}
         yara_ruleset={yararuleset}
       />
-      
+
       <DataGrid
-        getRowHeight={() => 'auto'}
+        getRowHeight={() => "auto"}
         disableRowSelectionOnClick
         rows={yararuleData}
         columns={columns}
         loading={!isConnected}
         checkboxSelection
+        disableRowSelectionExcludeModel
+        rowSelectionModel={selectionModel as any}
         onRowSelectionModelChange={(newSelection) => {
-          const selectionIterable = newSelection as unknown as Iterable<number>;
-          const selectedIds = [...selectionIterable].map(id => Number(id));
-          setChecked(selectedIds);
+          setSelectionModel(newSelection as any);
         }}
       />
-      
-      {checked.length > 0 && (
+
+      {(selectionModel as any).ids && (selectionModel as any).ids.size > 0 && (
         <Fab
           color="secondary"
           aria-label="delete"
@@ -528,7 +565,7 @@ return (
           <DeleteIcon />
         </Fab>
       )}
-      
+
       <Dialog
         open={openDeleteDialog}
         onClose={() => setOpenDeleteDialog(false)}

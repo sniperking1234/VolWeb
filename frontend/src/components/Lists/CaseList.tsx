@@ -103,10 +103,10 @@ function CaseList() {
           setCaseData((prevData) =>
             prevData.filter((caseItem) => caseItem.id !== message.id),
           );
-          setSelectionModel({
+          setSelectionModel((prev) => ({
             type: "include",
-            ids: new Set(),
-          });
+            ids: new Set([...prev.ids].filter((id) => id !== message.id)),
+          }));
         }
       };
 
@@ -260,9 +260,10 @@ function CaseList() {
         rows={caseData}
         loading={!isConnected}
         checkboxSelection
+        disableRowSelectionExcludeModel
         rowSelectionModel={selectionModel}
         onRowSelectionModelChange={(newSelection) =>
-          setSelectionModel(newSelection as GridRowSelectionModel)
+          setSelectionModel(newSelection)
         }
       />
       <Fab
