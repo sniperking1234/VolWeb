@@ -9,33 +9,21 @@ import {
   List,
   ListItem,
   ListItemText,
-  ListItemButton,
   Checkbox,
   FormControlLabel,
   Divider,
   Alert,
   Chip,
   CircularProgress,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  DialogContentText,
-  Tooltip
 } from "@mui/material";
 import Slide from "@mui/material/Slide";
-import Fade from "@mui/material/Fade";
 import { 
   Security, 
   PlayArrow, 
-  History, 
   CheckCircle,
   Delete,
-  DeleteForever 
 } from "@mui/icons-material";
 import { DataGrid, GridColDef, useGridApiRef } from "@mui/x-data-grid";
-import ArrowBack from "@mui/icons-material/ArrowBack";
 import axiosInstance from "../../utils/axiosInstance";
 import { YaraRuleSet, YaraRule, TaskData } from "../../types";
 import { useSnackbar } from "../SnackbarProvider";
