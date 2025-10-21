@@ -61,7 +61,7 @@ const PsTree: React.FC<PsTreeProps> = ({ setProcessMetadata }) => {
   const { id } = useParams<{ id: string }>();
   const [treeItems, setTreeItems] = useState<TreeViewBaseItem[]>([]);
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
   const { display_message } = useSnackbar();
 
   const fetchProcessMetadata = React.useCallback(
@@ -103,7 +103,7 @@ const PsTree: React.FC<PsTreeProps> = ({ setProcessMetadata }) => {
         setExpanded(allIds);
 
         if (transformedData.length > 0) {
-          setSelected(transformedData[0].id);
+          setSelected([transformedData[0].id]);
           fetchProcessMetadata(Number(transformedData[0].id));
         }
       } catch (error) {
@@ -114,16 +114,17 @@ const PsTree: React.FC<PsTreeProps> = ({ setProcessMetadata }) => {
     fetchTree();
   }, [id, fetchProcessMetadata]);
 
-  // Event handler for item selection
   const handleSelect = (
     _event: React.SyntheticEvent | null,
     itemIds: string | string[] | null,
   ) => {
-    const selectedId = Array.isArray(itemIds) ? itemIds[0] : itemIds;
-    if (selectedId) {
-      console.log(`Selected PID: ${selectedId}`);
-      setSelected(selectedId);
-      fetchProcessMetadata(Number(selectedId));
+    if (itemIds) {
+      const selectedArray = Array.isArray(itemIds) ? itemIds : [itemIds];
+      setSelected(selectedArray);
+      if (selectedArray[0]) {
+        console.log(`Selected PID: ${selectedArray[0]}`);
+        fetchProcessMetadata(Number(selectedArray[0]));
+      }
     }
   };
 

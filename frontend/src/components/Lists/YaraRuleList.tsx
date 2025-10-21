@@ -480,7 +480,9 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         loading={!isConnected}
         checkboxSelection
         onRowSelectionModelChange={(newSelection) => {
-          setChecked(newSelection as number[]);
+          const selectionIterable = newSelection as unknown as Iterable<number>;
+          const selectedIds = [...selectionIterable].map(id => Number(id));
+          setChecked(selectedIds);
         }}
       />
       
