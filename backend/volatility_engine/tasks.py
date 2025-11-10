@@ -169,8 +169,6 @@ def start_yararule_validation(yara_rule_id):
     
     channel_layer = get_channel_layer()
     
-    # Import here to avoid circular imports
-    from volatility_engine.engine import VolatilityEngine
     engine = VolatilityEngine(instance)
     
     # Set status to in-progress
@@ -208,9 +206,7 @@ def start_ruleset_validation(yara_ruleset_id):
     logger.info(f"Starting validation for YARA ruleset: {instance.name} (ID: {yara_ruleset_id})")
     
     channel_layer = get_channel_layer()
-    
-    # Import here to avoid circular imports
-    from volatility_engine.engine import VolatilityEngine
+
     engine = VolatilityEngine(instance)
     
     # Set status to in-progress

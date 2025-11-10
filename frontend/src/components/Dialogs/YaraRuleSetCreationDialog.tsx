@@ -79,8 +79,7 @@ const AddRuleSetDialog: React.FC<AddRuleSetDialogProps> = ({
         Create a yara ruleset
         <Typography sx={{ m: 0, pl: 2 }}>
             <i>
-            The case will contain all of the information about your
-            investigation.
+            The ruleset will contain all YARA rules assigned to it.
             </i>
         </Typography>
       </DialogTitle>
