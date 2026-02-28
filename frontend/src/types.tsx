@@ -106,6 +106,7 @@ export interface Plugin {
   display: string;
   category: string;
   results: boolean;
+  error_message?: string | null;
 }
 
 export interface Artefact {
@@ -155,6 +156,21 @@ export interface Symbol {
   name: string;
   os: string;
   description: number;
+}
+
+export interface AvailablePlugin {
+  name: string;
+  icon: string;
+  description: string;
+  display: string;
+  source: string;
+  execution_status?: "success" | "no_output" | "failed" | null;
+}
+
+export interface AvailablePluginsResponse {
+  os: string;
+  categories: { [category: string]: AvailablePlugin[] };
+  total_plugins: number;
 }
 
 export interface YaraRuleSet {

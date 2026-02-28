@@ -16,6 +16,7 @@ class VolatilityPlugin(models.Model):
     category = models.CharField(max_length=100)
     display = models.CharField(max_length=10)
     results = models.BooleanField(default=False)
+    error_message = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return str(self.name)

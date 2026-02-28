@@ -11,18 +11,62 @@ import logging
 logger = logging.getLogger(__name__)
 
 @shared_task(name="VolWeb.Engine")
-def start_extraction(evidence_id):
+def start_extraction(evidence_id, smart_rerun=False):
     """
-    This task will extract all the artefacts using different plugins
+    This task will extract all the artefacts using different plugins.
+    If smart_rerun=True, skip plugins that already completed successfully.
     """
     instance = Evidence.objects.get(id=evidence_id)
     engine = VolatilityEngine(instance)
     instance.status = 0
     instance.save()
-    engine.start_extraction()
+    engine.start_extraction(smart_rerun=smart_rerun)
     if instance.status != -1:
         instance.status = 100
         instance.save()
+
+
+@shared_task(name="VolWeb.SelectiveEngine")
+def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=None, skip_completed=False):
+    """
+    Extract artefacts using only the selected plugins.
+    If skip_completed=True, skip plugins that already have successful results.
+    """
+    instance = Evidence.objects.get(id=evidence_id)
+    engine = VolatilityEngine(instance)
+    instance.status = 0
+    instance.save()
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"volatility_tasks_{evidence_id}",
+        {
+            "type": "send_notification",
+            "message": {
+                "name": "selective_extraction",
+                "status": "started",
+                "result": None,
+            },
+        },
+    )
+
+    engine.start_selective_extraction(selected_plugins, pid_filter, skip_completed=skip_completed)
+
+    if instance.status != -1:
+        instance.status = 100
+        instance.save()
+
+    async_to_sync(channel_layer.group_send)(
+        f"volatility_tasks_{evidence_id}",
+        {
+            "type": "send_notification",
+            "message": {
+                "name": "selective_extraction",
+                "status": "finished",
+                "result": str(instance.status != -1).lower(),
+            },
+        },
+    )
 
 
 @shared_task

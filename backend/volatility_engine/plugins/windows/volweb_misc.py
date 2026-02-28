@@ -38,6 +38,16 @@ class VolWebMisc(plugins.PluginInterface):
 
     def run_all(self):
         volweb_plugins = self.load_plugin_info("volatility_engine/volweb_misc.json")
+
+        # Filter to selected plugins if specified via context config
+        selected_json = self.context.config.get("VolWeb.SelectedPlugins", None)
+        if selected_json:
+            selected = json.loads(selected_json)
+            volweb_plugins = {
+                name: details for name, details in volweb_plugins.items()
+                if name in selected
+            }
+
         instances = {}
         for plugin, details in volweb_plugins.items():
             try:
@@ -50,14 +60,33 @@ class VolWebMisc(plugins.PluginInterface):
             except ImportError as e:
                 vollog.error(f"Could not import {plugin}: {e}")
 
+        evidence_id = self.context.config["VolWeb.Evidence"]
         for name, plugin in instances.items():
-            vollog.info(f"RUNNING: {name}")
-            self._grid = plugin["class"].run()
-            renderer = DjangoRenderer(
-                evidence_id=self.context.config["VolWeb.Evidence"],
-                plugin=plugin["details"],
-            )
-            renderer.render(self._grid)
+            try:
+                vollog.info(f"RUNNING: {name}")
+                self._grid = plugin["class"].run()
+                renderer = DjangoRenderer(
+                    evidence_id=evidence_id,
+                    plugin=plugin["details"],
+                )
+                renderer.render(self._grid)
+            except Exception as e:
+                vollog.error(f"FAILED: {name}: {e}")
+                from evidences.models import Evidence
+                evidence = Evidence.objects.get(id=evidence_id)
+                VolatilityPlugin.objects.update_or_create(
+                    name=name,
+                    evidence=evidence,
+                    defaults={
+                        "icon": plugin["details"].get("icon", "None"),
+                        "description": plugin["details"].get("description", ""),
+                        "artefacts": None,
+                        "category": plugin["details"].get("category", "Other"),
+                        "display": plugin["details"].get("display", "True"),
+                        "results": False,
+                        "error_message": str(e),
+                    },
+                )
 
     def _generator(self):
         yield (0, ("Success",))

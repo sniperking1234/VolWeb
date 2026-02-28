@@ -43,7 +43,7 @@ services:
     depends_on:
       - volweb-postgresdb
       - volweb-redis
-    restart: always
+    restart: unless-stopped
     volumes:
       - staticfiles:/home/app/web/staticfiles
       - media:/home/app/web/media

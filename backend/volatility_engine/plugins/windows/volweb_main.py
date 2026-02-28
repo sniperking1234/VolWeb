@@ -39,6 +39,18 @@ class VolWebMain(plugins.PluginInterface):
     def run_all(self):
         volweb_plugins = self.load_plugin_info("volatility_engine/volweb_plugins.json")
 
+        # Filter to selected plugins if specified via context config
+        selected_json = self.context.config.get("VolWeb.SelectedPlugins", None)
+        if selected_json:
+            selected = json.loads(selected_json)
+            volweb_plugins = {
+                name: details for name, details in volweb_plugins.items()
+                if name in selected
+            }
+
+        # Read optional PID filter
+        pid_filter = self.context.config.get("VolWeb.PidFilter", None)
+
         instances = {}
         for plugin, details in volweb_plugins.items():
             try:
@@ -76,8 +88,22 @@ class VolWebMain(plugins.PluginInterface):
                 evidence.status = (count * 100) / total
                 count += 1
                 evidence.save()
-            except:
-                pass
+            except Exception as e:
+                vollog.error(f"FAILED: {name}: {e}")
+                VolatilityPlugin.objects.update_or_create(
+                    name=name,
+                    evidence=evidence,
+                    defaults={
+                        "icon": plugin["details"].get("icon", "None"),
+                        "description": plugin["details"].get("description", ""),
+                        "artefacts": None,
+                        "category": plugin["details"].get("category", "Other"),
+                        "display": plugin["details"].get("display", "True"),
+                        "results": False,
+                        "error_message": str(e),
+                    },
+                )
+                count += 1
 
     def _generator(self):
         yield (0, ("Success",))

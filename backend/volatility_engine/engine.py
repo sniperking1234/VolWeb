@@ -6,6 +6,7 @@ import logging
 import volatility3
 import traceback
 import os
+import json
 import shutil
 from volatility3.cli import MuteProgress
 from volatility3.framework.exceptions import UnsatisfiedException
@@ -86,6 +87,33 @@ class VolatilityEngine:
         if artefact_dir.exists():
             shutil.rmtree(artefact_dir, ignore_errors=True)
         artefact_dir.mkdir(parents=True, exist_ok=True)
+
+    def _purge_selected_plugins(self, plugin_names) -> None:
+        """
+        Remove only the specified plugin records from the database.
+        Keeps successful plugins intact. Also rebuilds EnrichedProcess data.
+        """
+        with transaction.atomic():
+            VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                name__in=plugin_names,
+            ).delete()
+            EnrichedProcess.objects.filter(
+                evidence=self.obj
+            ).delete()
+        os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+
+    def _get_successful_plugin_names(self) -> list:
+        """
+        Returns the list of plugin names that completed successfully (results=True)
+        for this evidence.
+        """
+        return list(
+            VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                results=True,
+            ).values_list("name", flat=True)
+        )
 
 
     def _load_core_modules(self):
@@ -237,18 +265,41 @@ class VolatilityEngine:
             )
         return result
 
-    def start_extraction(self):
+    def start_extraction(self, smart_rerun=False):
+        """
+        Extract all artefacts. If smart_rerun=True, skip plugins that already
+        completed successfully and only re-run failed/no-output ones.
+        """
         try:
-            self._purge_previous_run()
-            logger.info("Starting extraction")
-            self.obj.status = 0
-            os.makedirs(f"media/{self.obj.id}", exist_ok=True)
-            if self.obj.os == "windows":
-                self.start_windows_analysis()
-                self.construct_windows_explorer()
+            if smart_rerun:
+                successful = self._get_successful_plugin_names()
+                # Get all plugin names from catalogs
+                with open("volatility_engine/volweb_plugins.json", "r") as f:
+                    all_main = json.load(f).get("plugins", {}).get(self.obj.os, {})
+                with open("volatility_engine/volweb_misc.json", "r") as f:
+                    all_misc = json.load(f).get("plugins", {}).get(self.obj.os, {})
+                all_plugins = list(all_main.keys()) + list(all_misc.keys())
+                plugins_to_run = [p for p in all_plugins if p not in successful]
+                if not plugins_to_run:
+                    logger.info("All plugins already completed successfully, nothing to re-run")
+                    return
+                logger.info(f"Smart re-run: skipping {len(successful)} successful plugins, re-running {len(plugins_to_run)}")
+                self._purge_selected_plugins(plugins_to_run)
+                self.obj.status = 0
+                self.obj.save()
+                os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+                self.start_selective_extraction(plugins_to_run)
             else:
-                self.start_linux_analysis()
-                self.construct_linux_explorer()
+                self._purge_previous_run()
+                logger.info("Starting extraction")
+                self.obj.status = 0
+                os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+                if self.obj.os == "windows":
+                    self.start_windows_analysis()
+                    self.construct_windows_explorer()
+                else:
+                    self.start_linux_analysis()
+                    self.construct_linux_explorer()
         except UnsatisfiedException as e:
             self.obj.status = -1
             self.obj.save()
@@ -259,6 +310,89 @@ class VolatilityEngine:
             logger.error(f"Unknown error, should not happen: {str(e)}")
             logger.error(traceback.format_exc())
 
+
+    def start_selective_extraction(self, selected_plugins=None, pid_filter=None, skip_completed=False):
+        """
+        Run only the selected plugins instead of all plugins.
+        selected_plugins: list of plugin name strings
+        pid_filter: optional PID to filter process-based plugins
+        skip_completed: if True, skip plugins that already have results=True
+        """
+        try:
+            if skip_completed:
+                successful = self._get_successful_plugin_names()
+                original_count = len(selected_plugins)
+                selected_plugins = [p for p in selected_plugins if p not in successful]
+                logger.info(f"Smart selective: skipping {original_count - len(selected_plugins)} successful plugins")
+                if not selected_plugins:
+                    logger.info("All selected plugins already completed successfully, nothing to re-run")
+                    return
+                self._purge_selected_plugins(selected_plugins)
+            else:
+                self._purge_previous_run()
+            logger.info(f"Starting selective extraction with {len(selected_plugins)} plugins")
+            self.obj.status = 0
+            os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+
+            # Load plugin registries to separate main vs misc
+            with open("volatility_engine/volweb_plugins.json", "r") as f:
+                all_main = json.load(f).get("plugins", {}).get(self.obj.os, {})
+            with open("volatility_engine/volweb_misc.json", "r") as f:
+                all_misc = json.load(f).get("plugins", {}).get(self.obj.os, {})
+
+            main_selected = [p for p in selected_plugins if p in all_main]
+            misc_selected = [p for p in selected_plugins if p in all_misc]
+
+            if self.obj.os == "windows":
+                if main_selected:
+                    self._run_selective_wrapper(VolWebMainW, main_selected, pid_filter)
+                if misc_selected:
+                    self._run_selective_wrapper(VolWebMiscW, misc_selected, pid_filter)
+                self.construct_windows_explorer()
+            else:
+                if main_selected:
+                    self._run_selective_wrapper(VolWebMainL, main_selected, pid_filter)
+                if misc_selected:
+                    self._run_selective_wrapper(VolWebMiscL, misc_selected, pid_filter)
+                self.construct_linux_explorer()
+
+        except UnsatisfiedException as e:
+            self.obj.status = -1
+            self.obj.save()
+            logger.warning(f"Unsatisfied requirements: {str(e)}")
+        except Exception as e:
+            self.obj.status = -1
+            self.obj.save()
+            logger.error(f"Unknown error in selective extraction: {str(e)}")
+            logger.error(traceback.format_exc())
+
+    def _run_selective_wrapper(self, wrapper_class, selected_plugins, pid_filter=None):
+        """
+        Run a wrapper plugin with a filtered plugin list.
+        Passes the selected plugin list through the Volatility3 context config.
+        """
+        plugin_entry = {
+            wrapper_class: {
+                "icon": "None",
+                "description": f"VolWeb selective execution of {len(selected_plugins)} plugins",
+                "category": "Other",
+                "display": "False",
+                "name": "VolWebSelective",
+            }
+        }
+
+        self.build_context(plugin_entry)
+
+        # Pass selected plugins via context config
+        self.context.config["VolWeb.SelectedPlugins"] = json.dumps(selected_plugins)
+
+        # Pass optional PID filter
+        if pid_filter is not None:
+            self.context.config["VolWeb.PidFilter"] = int(pid_filter)
+
+        builted_plugin = self.construct_plugin()
+        self.run_plugin(builted_plugin)
+        fix_permissions(self.evidence_data["output_path"])
 
     def dump_process(self, pid):
         logger.info(f"Trying to dump PID {pid}")

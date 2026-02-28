@@ -16,6 +16,8 @@ from .views import (
     YaraScanTask,
     YaraScanHistoryView,
     YaraScanDetailView,
+    AvailablePluginsView,
+    SelectiveExtractionTask,
 )
 
 urlpatterns = [
@@ -49,5 +51,6 @@ urlpatterns = [
     path("evidence/<int:evidence_id>/yarascan/history/", YaraScanHistoryView.as_view(), name="yarascan-history"),
     path("evidence/<int:evidence_id>/yarascan/<str:plugin_name>/", YaraScanDetailView.as_view(), name="yarascan-detail"),
     path("evidence/tasks/yarascan/", YaraScanTask.as_view()),
-
+    path("evidence/<int:evidence_id>/available-plugins/", AvailablePluginsView.as_view(), name="available-plugins"),
+    path("evidence/tasks/selective-extraction/", SelectiveExtractionTask.as_view(), name="selective-extraction"),
 ]

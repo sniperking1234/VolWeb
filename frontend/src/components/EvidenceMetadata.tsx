@@ -19,6 +19,7 @@ const EvidenceMetadata: React.FC<EvidenceMetadataProps> = ({
     categories: Record<string, number>;
     total_ran: number;
     total_results: number;
+    total_failed: number;
   } | null>(null);
 
   useEffect(() => {
@@ -94,10 +95,14 @@ const EvidenceMetadata: React.FC<EvidenceMetadataProps> = ({
     },
   ];
 
-  const totalNoResults = data.total_ran - data.total_results;
+  const totalFailed = data.total_failed || 0;
+  const totalNoOutput = data.total_ran - data.total_results - totalFailed;
+
+  const donutColors = ["#097907", "#670979", "#ff9800"];
+  const donutGradientColors = ["#097907", "#670979", "#ff9800"];
 
   const donutOptions: ApexOptions = {
-    labels: ["Plugins with Results", "Plugins without Results"],
+    labels: ["Success", "Executed - No output", "Failed"],
     chart: {
       type: "donut",
       background: "transparent",
@@ -115,9 +120,9 @@ const EvidenceMetadata: React.FC<EvidenceMetadataProps> = ({
     fill: {
       type: "gradient",
       gradient: {
-        gradientToColors: gradientToColors.slice(0, 2),
+        gradientToColors: donutGradientColors,
       },
-      colors: colors.slice(0, 2),
+      colors: donutColors,
     },
     legend: {
       formatter: function (
@@ -137,11 +142,11 @@ const EvidenceMetadata: React.FC<EvidenceMetadataProps> = ({
         colors: theme !== "dark" ? "#101418" : "#fff",
       },
       markers: {
-        fillColors: colors.slice(0, 2),
+        fillColors: donutColors,
       },
     },
     title: {
-      text: "Plugins Ran vs Results",
+      text: "Plugin Execution Results",
       style: {
         color: theme !== "dark" ? "#101418" : "#fff",
       },
@@ -161,7 +166,7 @@ const EvidenceMetadata: React.FC<EvidenceMetadataProps> = ({
     ],
   };
 
-  const donutSeries: number[] = [data.total_results, totalNoResults];
+  const donutSeries: number[] = [data.total_results, totalNoOutput, totalFailed];
 
   return (
     <Box sx={{ flexGrow: 1 }}>

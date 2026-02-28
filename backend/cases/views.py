@@ -83,7 +83,8 @@ class CompleteUploadView(APIView):
                 url=f"file://{os.path.join(settings.MEDIA_ROOT, 'evidences', final_filename)}",
                 linked_case=upload_session.case,
                 os=upload_session.os,
-                etag=upload_session.upload_id
+                etag=upload_session.upload_id,
+                status=-2
             )
 
             # Delete the upload session

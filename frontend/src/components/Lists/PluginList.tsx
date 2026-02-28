@@ -69,11 +69,19 @@ const PluginList: React.FC<PluginListProps> = ({ evidenceId }) => {
                     component="span"
                     variant="body2"
                     sx={{
-                      color: plugin.results ? "green" : "red",
+                      color: plugin.error_message
+                        ? "orange"
+                        : plugin.results
+                          ? "green"
+                          : "grey",
                       display: "block",
                     }}
                   >
-                    {plugin.results ? "Available" : "Unavailable"}
+                    {plugin.error_message
+                      ? `Failed: ${plugin.error_message}`
+                      : plugin.results
+                        ? "Success"
+                        : "Executed - No output"}
                   </Typography>
                 </React.Fragment>
               }

@@ -57,12 +57,14 @@ class EvidenceStatisticsApiView(APIView):
 
         total_ran = plugins.count()
         total_results = plugins.filter(results=True).count()
+        total_failed = plugins.exclude(error_message__isnull=True).exclude(error_message="").count()
 
         return Response(
             {
                 "categories": dict(category_artefacts_counter),
                 "total_ran": total_ran,
                 "total_results": total_results,
+                "total_failed": total_failed,
             },
             status=status.HTTP_200_OK,
         )
@@ -187,7 +189,7 @@ class BindEvidenceViewSet(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Create the Evidence object
+        # Create the Evidence object with status=-2 (awaiting plugin selection)
         evidence_data = {
             "name": name,
             "etag": etag,
@@ -199,6 +201,7 @@ class BindEvidenceViewSet(APIView):
             "url": url,
             "region": region,
             "endpoint": endpoint,
+            "status": -2,
         }
 
         serializer = EvidenceSerializer(data=evidence_data)

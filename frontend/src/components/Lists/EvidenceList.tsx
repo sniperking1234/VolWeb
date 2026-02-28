@@ -32,7 +32,9 @@ import {
   Delete as DeleteIcon,
   RestartAlt,
   Fingerprint,
-  Work
+  Work,
+  Tune,
+  PlayArrow,
 } from "@mui/icons-material";
 import BindEvidenceDialog from "../Dialogs/BindEvidenceDialog";
 import { Evidence } from "../../types";
@@ -208,17 +210,19 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     }
   };
 
+  const handlePlayClick = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/restart/", { id: evidence.id });
+      display_message("success", "Analysis started.");
+    } catch (error) {
+      display_message("error", `Error starting analysis: ${error}`);
+    }
+  };
+
   const handleConfirmRestart = async () => {
     if (selectedEvidence) {
-      const id: number = selectedEvidence.id;
-      try {
-        await axiosInstance.post(`/api/evidence/tasks/restart/`, { id });
-        display_message("success", "Analysis restarted");
-      } catch (error) {
-        display_message("error", `Error restarting the analysis: ${error}`);
-      } finally {
-        setOpenRestartDialog(false);
-      }
+      setOpenRestartDialog(false);
+      navigate(`/evidences/${selectedEvidence.id}?configure=true`);
     }
   };
 
@@ -317,6 +321,17 @@ function EvidenceList({ caseId }: EvidenceListProps) {
               variant="outlined"
             />
           </div>
+        ) : params.value === -2 ? (
+          <div
+            style={{ display: "flex", alignItems: "center", height: "100%" }}
+          >
+            <Chip
+              label="Awaiting plugin selection"
+              size="small"
+              color="warning"
+              variant="outlined"
+            />
+          </div>
         ) : (
           <div
             style={{ display: "flex", alignItems: "center", height: "100%" }}
@@ -329,49 +344,76 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     {
       field: "actions",
       headerName: "Actions",
-      renderCell: (params: GridRenderCellParams) => (
-        <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
-          <Tooltip title="Investigate" placement="left">
-            {params.row.status !== 100 ? (
-              <IconButton edge="end" disabled={params.row.status !== 100}>
-                <Biotech />
-              </IconButton>
+      renderCell: (params: GridRenderCellParams) => {
+        const s = params.row.status;
+        const isRunning = s >= 0 && s < 100;
+        const isAwaiting = s === -2;
+
+        return (
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Tooltip title="Investigate" placement="left">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="open"
+                  disabled={isAwaiting || isRunning}
+                  onClick={() => handleToggle(params.row.id)}
+                >
+                  <Biotech />
+                </IconButton>
+              </span>
+            </Tooltip>
+            {isAwaiting ? (
+              <Tooltip title="Start analysis" placement="top">
+                <IconButton
+                  edge="end"
+                  aria-label="play"
+                  onClick={() => handlePlayClick(params.row)}
+                >
+                  <PlayArrow />
+                </IconButton>
+              </Tooltip>
             ) : (
-              <IconButton
-                edge="end"
-                aria-label="open"
-                onClick={() => handleToggle(params.row.id)}
-              >
-                <Biotech />
-              </IconButton>
+              <Tooltip title="Restart analysis" placement="top">
+                <span>
+                  <IconButton
+                    edge="end"
+                    aria-label="restart"
+                    disabled={isRunning}
+                    onClick={() => handleRestartClick(params.row)}
+                  >
+                    <RestartAlt />
+                  </IconButton>
+                </span>
+              </Tooltip>
             )}
-          </Tooltip>
-          <Tooltip title="Restart analysis" placement="right">
-            <IconButton
-              edge="end"
-              aria-label="restart"
-              onClick={() => handleRestartClick(params.row)}
-            >
-              <RestartAlt />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete" placement="right">
-            {params.row.status !== 100 ? (
-              <IconButton edge="end" disabled={params.row.status !== 100}>
-                <DeleteSweep />
-              </IconButton>
-            ) : (
-              <IconButton
-                edge="end"
-                aria-label="delete"
-                onClick={() => handleDeleteClick(params.row)}
-              >
-                <DeleteSweep />
-              </IconButton>
-            )}
-          </Tooltip>
-        </div>
-      ),
+            <Tooltip title="Configure & Run" placement="top">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="configure"
+                  disabled={isRunning}
+                  onClick={() => navigate(`/evidences/${params.row.id}?configure=true`)}
+                >
+                  <Tune />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Delete" placement="right">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="delete"
+                  disabled={isRunning}
+                  onClick={() => handleDeleteClick(params.row)}
+                >
+                  <DeleteSweep />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </div>
+        );
+      },
       flex: 1,
     },
   ];

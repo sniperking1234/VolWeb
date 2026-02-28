@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useCallback } from "react";
 import axiosInstance from "../../utils/axiosInstance";
 import Tabs from "@mui/material/Tabs";
 import Tab from "@mui/material/Tab";
@@ -11,11 +11,12 @@ import TimelineIcon from "@mui/icons-material/Timeline";
 import SecurityIcon from "@mui/icons-material/Security";
 import Timeliner from "../../components/Investigate/Timeliner";
 import YaraScan from "../../components/Investigate/YaraScan";
+import PluginSelector from "../../components/Investigate/PluginSelector";
 import StixModule from "../../components/StixModule";
 import ExploreLinux from "../../components/Explore/Linux/Explore";
 import ExploreWin from "../../components/Explore/Windows/Explore";
 import { Evidence } from "../../types";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { Biotech, BlurOn } from "@mui/icons-material";
 import { useSnackbar } from "../../components/SnackbarProvider";
 
@@ -51,30 +52,48 @@ function a11yProps(index: number) {
 const EvidenceDetail: React.FC = () => {
   const [value, setValue] = React.useState(0);
   const { display_message } = useSnackbar();
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [currentEvidence, setCurrentEvidence] = React.useState<Evidence>();
-  
-  useEffect(() => {
-    const fetchEvidenceDetails = async () => {
-      if (id) {
-        try {
-          const response = await axiosInstance.get(`/api/evidences/${id}`);
-          setCurrentEvidence(response.data);
-        } catch (error) {
-          display_message(
-            "error",
-            `Failed to fetch evidence details: ${error}`,
-          );
-        }
-      }
-    };
+  const showConfigure = searchParams.get("configure") === "true";
 
-    fetchEvidenceDetails();
+  const fetchEvidenceDetails = useCallback(async () => {
+    if (id) {
+      try {
+        const response = await axiosInstance.get(`/api/evidences/${id}`);
+        setCurrentEvidence(response.data);
+      } catch (error) {
+        display_message(
+          "error",
+          `Failed to fetch evidence details: ${error}`,
+        );
+      }
+    }
   }, [id, display_message]);
+
+  useEffect(() => {
+    fetchEvidenceDetails();
+  }, [fetchEvidenceDetails]);
 
   const handleChange = (_: React.SyntheticEvent, newValue: number) => {
     setValue(newValue);
   };
+
+  // Show plugin selector when evidence is awaiting plugin selection or configure mode
+  if (currentEvidence && (currentEvidence.status === -2 || showConfigure)) {
+    return (
+      <Box sx={{ width: "100%" }}>
+        <PluginSelector
+          evidenceId={id!}
+          evidenceOs={currentEvidence.os}
+          onExtractionStarted={() => {
+            navigate(-1);
+          }}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ width: "100%" }}>
