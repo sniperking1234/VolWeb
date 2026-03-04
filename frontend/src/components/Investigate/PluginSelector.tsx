@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   Box,
   Button,
+  IconButton,
   Paper,
   Typography,
   List,
@@ -20,6 +21,7 @@ import {
   Tooltip,
 } from "@mui/material";
 import {
+  ArrowBack,
   Extension,
   PlayArrow,
   ExpandMore,
@@ -39,6 +41,7 @@ interface PluginSelectorProps {
   evidenceId: string;
   evidenceOs: string;
   onExtractionStarted?: () => void;
+  onBack?: () => void;
 }
 
 // Required plugins that cannot be deselected
@@ -72,6 +75,7 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
   evidenceId,
   evidenceOs,
   onExtractionStarted,
+  onBack,
 }) => {
   const { display_message } = useSnackbar();
   const ws = useRef<WebSocket | null>(null);
@@ -295,10 +299,17 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
     <Box sx={{ p: 3 }}>
       <Paper elevation={3} sx={{ p: 3 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-          <Typography variant="h5" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            <Extension color="primary" />
-            Plugin Selection
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {onBack && (
+              <IconButton onClick={onBack} size="small">
+                <ArrowBack />
+              </IconButton>
+            )}
+            <Typography variant="h5" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Extension color="primary" />
+              Plugin Selection
+            </Typography>
+          </Box>
           <Chip
             label={`${selectedPlugins.length} / ${totalPlugins} plugins selected`}
             color="primary"

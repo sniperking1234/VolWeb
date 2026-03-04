@@ -90,6 +90,9 @@ const EvidenceDetail: React.FC = () => {
           onExtractionStarted={() => {
             navigate(-1);
           }}
+          onBack={() => {
+            navigate("/evidences");
+          }}
         />
       </Box>
     );
