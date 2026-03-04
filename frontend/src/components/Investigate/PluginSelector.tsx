@@ -28,6 +28,8 @@ import {
   CheckCircle,
   ErrorOutline,
   RemoveCircleOutline,
+  Timer,
+  TimerOff,
 } from "@mui/icons-material";
 import axiosInstance from "../../utils/axiosInstance";
 import { AvailablePlugin, AvailablePluginsResponse } from "../../types";
@@ -83,6 +85,8 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
   const [processing, setProcessing] = useState(false);
   const [skipCompleted, setSkipCompleted] = useState(true);
   const [hasExecutedPlugins, setHasExecutedPlugins] = useState(false);
+  const [enableTimeout, setEnableTimeout] = useState(false);
+  const [pluginTimeout, setPluginTimeout] = useState<string>("600");
 
   const requiredPlugins = REQUIRED_PLUGINS[evidenceOs] || [];
 
@@ -106,6 +110,7 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
           .filter((p) =>
             requiredPlugins.includes(p.name) ||
             p.execution_status === "failed" ||
+            p.execution_status === "timed_out" ||
             p.execution_status === "no_output" ||
             p.execution_status === null ||
             p.execution_status === undefined
@@ -236,6 +241,17 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
             sx={{ height: 20, "& .MuiChip-label": { fontSize: "0.65rem" } }}
           />
         );
+      case "timed_out":
+        return (
+          <Chip
+            icon={<TimerOff />}
+            label="Timed out"
+            size="small"
+            color="error"
+            variant="outlined"
+            sx={{ height: 20, "& .MuiChip-label": { fontSize: "0.65rem" } }}
+          />
+        );
       default:
         return null;
     }
@@ -255,6 +271,7 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
         run_timeliner: runTimeliner,
         pid: pidFilter ? parseInt(pidFilter) : null,
         skip_completed: skipCompleted && hasExecutedPlugins,
+        plugin_timeout: enableTimeout && pluginTimeout ? parseInt(pluginTimeout) : null,
       });
       display_message("info", "Analysis started");
       if (onExtractionStarted) {
@@ -339,6 +356,32 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
             sx={{ width: 200 }}
             helperText="Filter process-based plugins by PID"
           />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={enableTimeout}
+                onChange={(e) => setEnableTimeout(e.target.checked)}
+              />
+            }
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Timer fontSize="small" />
+                Plugin Timeout
+              </Box>
+            }
+          />
+          {enableTimeout && (
+            <TextField
+              label="Timeout (seconds)"
+              type="number"
+              size="small"
+              value={pluginTimeout}
+              onChange={(e) => setPluginTimeout(e.target.value)}
+              sx={{ width: 160 }}
+              helperText="Per-plugin time limit"
+              inputProps={{ min: 10 }}
+            />
+          )}
         </Box>
 
         <Divider sx={{ mb: 2 }} />

@@ -1,6 +1,7 @@
 import json
 import logging
 import importlib
+import signal
 from volatility3.framework.interfaces import plugins
 from volatility3.framework.configuration import requirements
 from volatility3.framework.renderers import TreeGrid
@@ -57,15 +58,35 @@ class VolWebMisc(plugins.PluginInterface):
                 vollog.error(f"Could not import {plugin}: {e}")
 
         evidence_id = self.context.config["VolWeb.Evidence"]
+
+        # Read optional per-plugin timeout (in seconds)
+        plugin_timeout = self.context.config.get("VolWeb.PluginTimeout", None)
+
         for name, plugin in instances.items():
             try:
                 vollog.info(f"RUNNING: {name}")
-                self._grid = plugin["class"].run()
-                renderer = DjangoRenderer(
-                    evidence_id=evidence_id,
-                    plugin=plugin["details"],
-                )
-                renderer.render(self._grid)
+                if plugin_timeout:
+                    def _timeout_handler(signum, frame):
+                        raise TimeoutError(f"Plugin timed out after {plugin_timeout} seconds")
+                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(int(plugin_timeout))
+                    try:
+                        self._grid = plugin["class"].run()
+                        renderer = DjangoRenderer(
+                            evidence_id=evidence_id,
+                            plugin=plugin["details"],
+                        )
+                        renderer.render(self._grid)
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                else:
+                    self._grid = plugin["class"].run()
+                    renderer = DjangoRenderer(
+                        evidence_id=evidence_id,
+                        plugin=plugin["details"],
+                    )
+                    renderer.render(self._grid)
             except Exception as e:
                 vollog.error(f"FAILED: {name}: {e}")
                 from evidences.models import Evidence

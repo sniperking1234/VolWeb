@@ -164,7 +164,7 @@ export interface AvailablePlugin {
   description: string;
   display: string;
   source: string;
-  execution_status?: "success" | "no_output" | "failed" | null;
+  execution_status?: "success" | "no_output" | "failed" | "timed_out" | null;
 }
 
 export interface AvailablePluginsResponse {

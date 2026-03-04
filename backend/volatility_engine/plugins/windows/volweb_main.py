@@ -1,6 +1,7 @@
 import json
 import logging
 import importlib
+import signal
 from typing import Dict, Any, List, Tuple, Optional
 from volatility3.framework import interfaces
 from volatility3.framework.interfaces import plugins
@@ -65,6 +66,10 @@ class VolWebMain(plugins.PluginInterface):
 
         evidence_id = self.context.config["VolWeb.Evidence"]
         evidence = Evidence.objects.get(id=evidence_id)
+
+        # Read optional per-plugin timeout (in seconds)
+        plugin_timeout = self.context.config.get("VolWeb.PluginTimeout", None)
+
         count = 0
         total = len(instances.items())
         for name, plugin in instances.items():
@@ -80,11 +85,26 @@ class VolWebMain(plugins.PluginInterface):
                 plugin["class"]._file_handler = file_handler(
                     f"media/{evidence_id}/"
                 )  # Our file_handler need to be passed to the sub-plugin
-                self._grid = plugin["class"].run()
-                renderer = DjangoRenderer(
-                    evidence_id=evidence_id, plugin=plugin["details"]
-                )  # Render the output of each plugin in the django database
-                renderer.render(self._grid)
+                if plugin_timeout:
+                    def _timeout_handler(signum, frame):
+                        raise TimeoutError(f"Plugin timed out after {plugin_timeout} seconds")
+                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(int(plugin_timeout))
+                    try:
+                        self._grid = plugin["class"].run()
+                        renderer = DjangoRenderer(
+                            evidence_id=evidence_id, plugin=plugin["details"]
+                        )
+                        renderer.render(self._grid)
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                else:
+                    self._grid = plugin["class"].run()
+                    renderer = DjangoRenderer(
+                        evidence_id=evidence_id, plugin=plugin["details"]
+                    )
+                    renderer.render(self._grid)
                 evidence.status = (count * 100) / total
                 count += 1
                 evidence.save()

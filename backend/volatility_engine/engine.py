@@ -311,12 +311,13 @@ class VolatilityEngine:
             logger.error(traceback.format_exc())
 
 
-    def start_selective_extraction(self, selected_plugins=None, pid_filter=None, skip_completed=False):
+    def start_selective_extraction(self, selected_plugins=None, pid_filter=None, skip_completed=False, plugin_timeout=None):
         """
         Run only the selected plugins instead of all plugins.
         selected_plugins: list of plugin name strings
         pid_filter: optional PID to filter process-based plugins
         skip_completed: if True, skip plugins that already have results=True
+        plugin_timeout: optional per-plugin timeout in seconds (None = no timeout)
         """
         try:
             if skip_completed:
@@ -345,15 +346,15 @@ class VolatilityEngine:
 
             if self.obj.os == "windows":
                 if main_selected:
-                    self._run_selective_wrapper(VolWebMainW, main_selected, pid_filter)
+                    self._run_selective_wrapper(VolWebMainW, main_selected, pid_filter, plugin_timeout)
                 if misc_selected:
-                    self._run_selective_wrapper(VolWebMiscW, misc_selected, pid_filter)
+                    self._run_selective_wrapper(VolWebMiscW, misc_selected, pid_filter, plugin_timeout)
                 self.construct_windows_explorer()
             else:
                 if main_selected:
-                    self._run_selective_wrapper(VolWebMainL, main_selected, pid_filter)
+                    self._run_selective_wrapper(VolWebMainL, main_selected, pid_filter, plugin_timeout)
                 if misc_selected:
-                    self._run_selective_wrapper(VolWebMiscL, misc_selected, pid_filter)
+                    self._run_selective_wrapper(VolWebMiscL, misc_selected, pid_filter, plugin_timeout)
                 self.construct_linux_explorer()
 
         except UnsatisfiedException as e:
@@ -366,7 +367,7 @@ class VolatilityEngine:
             logger.error(f"Unknown error in selective extraction: {str(e)}")
             logger.error(traceback.format_exc())
 
-    def _run_selective_wrapper(self, wrapper_class, selected_plugins, pid_filter=None):
+    def _run_selective_wrapper(self, wrapper_class, selected_plugins, pid_filter=None, plugin_timeout=None):
         """
         Run a wrapper plugin with a filtered plugin list.
         Passes the selected plugin list through the Volatility3 context config.
@@ -389,6 +390,10 @@ class VolatilityEngine:
         # Pass optional PID filter
         if pid_filter is not None:
             self.context.config["VolWeb.PidFilter"] = int(pid_filter)
+
+        # Pass optional per-plugin timeout
+        if plugin_timeout is not None:
+            self.context.config["VolWeb.PluginTimeout"] = int(plugin_timeout)
 
         builted_plugin = self.construct_plugin()
         self.run_plugin(builted_plugin)

@@ -452,7 +452,9 @@ class AvailablePluginsView(APIView):
             # Build a map of already-executed plugins for this evidence
             executed_plugins = {}
             for p in VolatilityPlugin.objects.filter(evidence=evidence):
-                if p.error_message:
+                if p.error_message and "timed out" in p.error_message.lower():
+                    executed_plugins[p.name] = "timed_out"
+                elif p.error_message:
                     executed_plugins[p.name] = "failed"
                 elif p.results:
                     executed_plugins[p.name] = "success"
@@ -525,6 +527,7 @@ class SelectiveExtractionTask(APIView):
             run_timeliner = request.data.get("run_timeliner", False)
             pid_filter = request.data.get("pid", None)
             skip_completed = request.data.get("skip_completed", False)
+            plugin_timeout = request.data.get("plugin_timeout", None)
 
             if not evidence_id:
                 return Response(
@@ -550,6 +553,7 @@ class SelectiveExtractionTask(APIView):
                     "selected_plugins": merged_plugins,
                     "pid_filter": int(pid_filter) if pid_filter else None,
                     "skip_completed": skip_completed,
+                    "plugin_timeout": int(plugin_timeout) if plugin_timeout else None,
                 }
             )
 

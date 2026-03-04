@@ -27,10 +27,11 @@ def start_extraction(evidence_id, smart_rerun=False):
 
 
 @shared_task(name="VolWeb.SelectiveEngine")
-def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=None, skip_completed=False):
+def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=None, skip_completed=False, plugin_timeout=None):
     """
     Extract artefacts using only the selected plugins.
     If skip_completed=True, skip plugins that already have successful results.
+    If plugin_timeout is set, each individual plugin will be killed after that many seconds.
     """
     instance = Evidence.objects.get(id=evidence_id)
     engine = VolatilityEngine(instance)
@@ -50,7 +51,7 @@ def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=No
         },
     )
 
-    engine.start_selective_extraction(selected_plugins, pid_filter, skip_completed=skip_completed)
+    engine.start_selective_extraction(selected_plugins, pid_filter, skip_completed=skip_completed, plugin_timeout=plugin_timeout)
 
     if instance.status != -1:
         instance.status = 100
