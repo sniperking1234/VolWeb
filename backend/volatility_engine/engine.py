@@ -182,62 +182,6 @@ class VolatilityEngine:
             return result
         return None
 
-    def start_windows_analysis(self):
-        plugin_list = [
-            {
-                VolWebMainW: {
-                    "icon": "None",
-                    "description": "VolWeb Main plugin executing many other plugins with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMain",
-                }
-            },
-            {
-                VolWebMiscW: {
-                    "icon": "None",
-                    "description": "VolWeb Misc plugin executing other plugins that are sharing the same requirements with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMisc",
-                }
-            },
-        ]
-        for plugin in plugin_list:
-            logger.debug(f"Running {plugin}...")
-            self.build_context(plugin)
-            builted_plugin = self.construct_plugin()
-            self.run_plugin(builted_plugin)
-        fix_permissions(self.evidence_data["output_path"])
-
-    def start_linux_analysis(self):
-        plugin_list = [
-            {
-                VolWebMainL: {
-                    "icon": "None",
-                    "description": "VolWeb Main plugin executing many other plugins with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMain",
-                }
-            },
-            {
-                VolWebMiscL: {
-                    "icon": "None",
-                    "description": "VolWeb Misc plugin executing other plugins that are sharing the same requirements with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMisc",
-                }
-            },
-        ]
-        for plugin in plugin_list:
-            logger.debug(f"RUNNING PLUGIN: {plugin}")
-            self.build_context(plugin)
-            builted_plugin = self.construct_plugin()
-            self.run_plugin(builted_plugin)
-        fix_permissions(self.evidence_data["output_path"])
-
     def start_timeliner(self):
         timeliner_plugin = {
             volatility3.plugins.timeliner.Timeliner: {
@@ -264,52 +208,6 @@ class VolatilityEngine:
                 results=True,
             )
         return result
-
-    def start_extraction(self, smart_rerun=False):
-        """
-        Extract all artefacts. If smart_rerun=True, skip plugins that already
-        completed successfully and only re-run failed/no-output ones.
-        """
-        try:
-            if smart_rerun:
-                successful = self._get_successful_plugin_names()
-                # Get all plugin names from catalogs
-                with open("volatility_engine/volweb_plugins.json", "r") as f:
-                    all_main = json.load(f).get("plugins", {}).get(self.obj.os, {})
-                with open("volatility_engine/volweb_misc.json", "r") as f:
-                    all_misc = json.load(f).get("plugins", {}).get(self.obj.os, {})
-                all_plugins = list(all_main.keys()) + list(all_misc.keys())
-                plugins_to_run = [p for p in all_plugins if p not in successful]
-                if not plugins_to_run:
-                    logger.info("All plugins already completed successfully, nothing to re-run")
-                    return
-                logger.info(f"Smart re-run: skipping {len(successful)} successful plugins, re-running {len(plugins_to_run)}")
-                self._purge_selected_plugins(plugins_to_run)
-                self.obj.status = 0
-                self.obj.save()
-                os.makedirs(f"media/{self.obj.id}", exist_ok=True)
-                self.start_selective_extraction(plugins_to_run)
-            else:
-                self._purge_previous_run()
-                logger.info("Starting extraction")
-                self.obj.status = 0
-                os.makedirs(f"media/{self.obj.id}", exist_ok=True)
-                if self.obj.os == "windows":
-                    self.start_windows_analysis()
-                    self.construct_windows_explorer()
-                else:
-                    self.start_linux_analysis()
-                    self.construct_linux_explorer()
-        except UnsatisfiedException as e:
-            self.obj.status = -1
-            self.obj.save()
-            logger.warning(f"Unsatisfied requirements: {str(e)}")
-        except Exception as e:
-            self.obj.status = -1
-            self.obj.save()
-            logger.error(f"Unknown error, should not happen: {str(e)}")
-            logger.error(traceback.format_exc())
-
 
     def start_selective_extraction(self, selected_plugins=None, pid_filter=None, skip_completed=False, plugin_timeout=None):
         """
@@ -359,11 +257,11 @@ class VolatilityEngine:
 
         except UnsatisfiedException as e:
             self.obj.status = -1
-            self.obj.save()
+            self.obj.save(update_fields=["status"])
             logger.warning(f"Unsatisfied requirements: {str(e)}")
         except Exception as e:
             self.obj.status = -1
-            self.obj.save()
+            self.obj.save(update_fields=["status"])
             logger.error(f"Unknown error in selective extraction: {str(e)}")
             logger.error(traceback.format_exc())
 

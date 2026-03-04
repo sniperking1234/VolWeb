@@ -318,46 +318,48 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
         </Box>
 
         {/* Global controls */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 3, mb: 2, flexWrap: "wrap" }}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={allSelected}
-                indeterminate={someSelected}
-                onChange={(e) => handleSelectAll(e.target.checked)}
-              />
-            }
-            label="Select All Plugins"
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={runTimeliner}
-                onChange={(e) => setRunTimeliner(e.target.checked)}
-              />
-            }
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                <Timeline fontSize="small" />
-                Include Timeliner
-              </Box>
-            }
-          />
-          {hasExecutedPlugins && (
+        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 3, mb: 2, flexWrap: "wrap" }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={skipCompleted}
-                  onChange={(e) => setSkipCompleted(e.target.checked)}
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onChange={(e) => handleSelectAll(e.target.checked)}
+                />
+              }
+              label="Select All Plugins"
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={runTimeliner}
+                  onChange={(e) => setRunTimeliner(e.target.checked)}
                 />
               }
               label={
-                <Tooltip title="Skip plugins that already completed with results">
-                  <span>Skip successful plugins</span>
-                </Tooltip>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Timeline fontSize="small" />
+                  Include Timeliner
+                </Box>
               }
             />
-          )}
+            {hasExecutedPlugins && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={skipCompleted}
+                    onChange={(e) => setSkipCompleted(e.target.checked)}
+                  />
+                }
+                label={
+                  <Tooltip title="Skip plugins that already completed with results">
+                    <span>Skip successful plugins</span>
+                  </Tooltip>
+                }
+              />
+            )}
+          </Box>
           <TextField
             label="PID Filter (optional)"
             type="number"
@@ -367,32 +369,34 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
             sx={{ width: 200 }}
             helperText="Filter process-based plugins by PID"
           />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={enableTimeout}
-                onChange={(e) => setEnableTimeout(e.target.checked)}
-              />
-            }
-            label={
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                <Timer fontSize="small" />
-                Plugin Timeout
-              </Box>
-            }
-          />
-          {enableTimeout && (
-            <TextField
-              label="Timeout (seconds)"
-              type="number"
-              size="small"
-              value={pluginTimeout}
-              onChange={(e) => setPluginTimeout(e.target.value)}
-              sx={{ width: 160 }}
-              helperText="Per-plugin time limit"
-              inputProps={{ min: 10 }}
+          <Box sx={{ display: "flex", flexDirection: "column" }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={enableTimeout}
+                  onChange={(e) => setEnableTimeout(e.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Timer fontSize="small" />
+                  Plugin Timeout
+                </Box>
+              }
             />
-          )}
+            {enableTimeout && (
+              <TextField
+                label="Timeout (seconds)"
+                type="number"
+                size="small"
+                value={pluginTimeout}
+                onChange={(e) => setPluginTimeout(e.target.value)}
+                sx={{ width: 160, ml: 4 }}
+                helperText="Per-plugin time limit"
+                inputProps={{ min: 10 }}
+              />
+            )}
+          </Box>
         </Box>
 
         <Divider sx={{ mb: 2 }} />

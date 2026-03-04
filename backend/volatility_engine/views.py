@@ -18,7 +18,6 @@ from .tasks import (
     start_timeliner,
     dump_windows_handles,
     dump_maps,
-    start_extraction,
     start_selective_extraction,
     start_yarascan,
     start_yararule_validation,
@@ -157,17 +156,56 @@ class PluginArtefactsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-class RestartAnalysisTask(APIView):
+
+class PauseExtractionTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
         try:
             evidence_id = request.data.get("id")
             evidence = Evidence.objects.get(id=evidence_id)
-            start_extraction.apply_async(
-                args=[evidence.id],
-                kwargs={"smart_rerun": True},
+            evidence.extraction_control = "paused"
+            evidence.save(update_fields=["extraction_control"])
+            return Response(status=status.HTTP_200_OK)
+        except Evidence.DoesNotExist:
+            return Response(
+                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
             )
+
+
+class ResumeExtractionTask(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        try:
+            evidence_id = request.data.get("id")
+            evidence = Evidence.objects.get(id=evidence_id)
+            evidence.extraction_control = "running"
+            evidence.save(update_fields=["extraction_control"])
+            return Response(status=status.HTTP_200_OK)
+        except Evidence.DoesNotExist:
+            return Response(
+                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+
+class StopExtractionTask(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        try:
+            evidence_id = request.data.get("id")
+            evidence = Evidence.objects.get(id=evidence_id)
+
+            # Revoke the Celery task to kill it immediately
+            if evidence.celery_task_id:
+                from backend.celery import app
+                app.control.revoke(evidence.celery_task_id, terminate=True, signal="SIGTERM")
+
+            evidence.extraction_control = "idle"
+            evidence.celery_task_id = ""
+            evidence.status = 100
+            evidence.save(update_fields=["extraction_control", "celery_task_id", "status"])
             return Response(status=status.HTTP_200_OK)
         except Evidence.DoesNotExist:
             return Response(
@@ -547,7 +585,7 @@ class SelectiveExtractionTask(APIView):
             required = self.REQUIRED_PLUGINS.get(evidence.os, [])
             merged_plugins = list(set(selected_plugins + required))
 
-            start_selective_extraction.apply_async(
+            result = start_selective_extraction.apply_async(
                 args=[evidence.id],
                 kwargs={
                     "selected_plugins": merged_plugins,
@@ -556,6 +594,9 @@ class SelectiveExtractionTask(APIView):
                     "plugin_timeout": int(plugin_timeout) if plugin_timeout else None,
                 }
             )
+
+            evidence.celery_task_id = result.id
+            evidence.save(update_fields=["celery_task_id"])
 
             if run_timeliner:
                 start_timeliner.apply_async(args=[evidence.id])

@@ -2,6 +2,7 @@ import json
 import logging
 import importlib
 import signal
+import time
 from typing import Dict, Any, List, Tuple, Optional
 from volatility3.framework import interfaces
 from volatility3.framework.interfaces import plugins
@@ -10,6 +11,7 @@ from volatility3.framework.renderers import TreeGrid
 from volatility_engine.utils import DjangoRenderer
 from volatility_engine.models import VolatilityPlugin
 from volatility3.plugins import yarascan
+from evidences.models import Evidence
 
 vollog = logging.getLogger(__name__)
 
@@ -62,11 +64,23 @@ class VolWebMisc(plugins.PluginInterface):
                 vollog.error(f"Could not import {plugin}: {e}")
 
         evidence_id = self.context.config["VolWeb.Evidence"]
+        evidence = Evidence.objects.get(id=evidence_id)
 
         # Read optional per-plugin timeout (in seconds)
         plugin_timeout = self.context.config.get("VolWeb.PluginTimeout", None)
 
         for name, plugin in instances.items():
+            # Pause/Stop check
+            evidence.refresh_from_db()
+            while evidence.extraction_control == "paused":
+                time.sleep(3)
+                evidence.refresh_from_db()
+                if evidence.extraction_control == "stop_requested":
+                    break
+            if evidence.extraction_control == "stop_requested":
+                vollog.info(f"Stop requested — halting extraction for evidence {evidence_id}")
+                break
+
             try:
                 vollog.info(f"RUNNING: {name}")
                 if plugin_timeout:
@@ -93,8 +107,6 @@ class VolWebMisc(plugins.PluginInterface):
                     renderer.render(self._grid)
             except Exception as e:
                 vollog.error(f"FAILED: {name}: {e}")
-                from evidences.models import Evidence
-                evidence = Evidence.objects.get(id=evidence_id)
                 VolatilityPlugin.objects.update_or_create(
                     name=name,
                     evidence=evidence,

@@ -33,8 +33,9 @@ import {
   RestartAlt,
   Fingerprint,
   Work,
-  Tune,
   PlayArrow,
+  Pause,
+  Stop,
 } from "@mui/icons-material";
 import BindEvidenceDialog from "../Dialogs/BindEvidenceDialog";
 import { Evidence } from "../../types";
@@ -47,8 +48,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
   const navigate = useNavigate();
   const [evidenceData, setEvidenceData] = useState<Evidence[]>([]);
   const [openDeleteDialog, setOpenDeleteDialog] = useState<boolean>(false);
-  const [openRestartDialog, setOpenRestartDialog] = useState<boolean>(false);
-
   const [openCreationDialog, setOpenCreationDialog] = useState<boolean>(false);
   const [openBindingDialog, setOpenBindingDialog] = useState<boolean>(false);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(
@@ -183,11 +182,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     setDeleteMultiple(false);
   };
 
-  const handleRestartClick = (row: Evidence) => {
-    setSelectedEvidence(row);
-    setOpenRestartDialog(true);
-  };
-
   const handleOpenDeleteMultipleDialog = () => {
     setDeleteMultiple(true);
     setOpenDeleteDialog(true);
@@ -210,21 +204,49 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     }
   };
 
-  const handlePlayClick = async (evidence: Evidence) => {
+  const handlePlayClick = (evidence: Evidence) => {
+    navigate(`/evidences/${evidence.id}?configure=true`);
+  };
+
+  const handlePause = async (evidence: Evidence) => {
     try {
-      await axiosInstance.post("/api/evidence/tasks/restart/", { id: evidence.id });
-      display_message("success", "Analysis started.");
+      await axiosInstance.post("/api/evidence/tasks/pause/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "paused" } : e,
+        ),
+      );
     } catch (error) {
-      display_message("error", `Error starting analysis: ${error}`);
+      display_message("error", `Error pausing extraction: ${error}`);
     }
   };
 
-  const handleConfirmRestart = async () => {
-    if (selectedEvidence) {
-      setOpenRestartDialog(false);
-      navigate(`/evidences/${selectedEvidence.id}?configure=true`);
+  const handleResume = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/resume/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "running" } : e,
+        ),
+      );
+    } catch (error) {
+      display_message("error", `Error resuming extraction: ${error}`);
     }
   };
+
+  const handleStop = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/stop/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "idle", status: 100 } : e,
+        ),
+      );
+    } catch (error) {
+      display_message("error", `Error stopping extraction: ${error}`);
+    }
+  };
+
 
   const handleDeleteSelected = async () => {
     try {
@@ -299,7 +321,18 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       field: "status",
       headerName: "Status",
       renderCell: (params: GridRenderCellParams) =>
-        params.value === 100 ? (
+        params.row.extraction_control === "paused" ? (
+          <div
+            style={{ display: "flex", alignItems: "center", height: "100%" }}
+          >
+            <Chip
+              label="Paused"
+              size="small"
+              color="warning"
+              variant="outlined"
+            />
+          </div>
+        ) : params.value === 100 ? (
           <div
             style={{ display: "flex", alignItems: "center", height: "100%" }}
           >
@@ -346,7 +379,10 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       headerName: "Actions",
       renderCell: (params: GridRenderCellParams) => {
         const s = params.row.status;
-        const isRunning = s >= 0 && s < 100;
+        const ec = params.row.extraction_control;
+        const isRunning = s >= 0 && s < 100 && ec !== "paused";
+        const isPaused = ec === "paused";
+        const isExtracting = isRunning || isPaused;
         const isAwaiting = s === -2;
 
         return (
@@ -356,7 +392,7 @@ function EvidenceList({ caseId }: EvidenceListProps) {
                 <IconButton
                   edge="end"
                   aria-label="open"
-                  disabled={isAwaiting || isRunning}
+                  disabled={isAwaiting}
                   onClick={() => handleToggle(params.row.id)}
                 >
                   <Biotech />
@@ -373,38 +409,67 @@ function EvidenceList({ caseId }: EvidenceListProps) {
                   <PlayArrow />
                 </IconButton>
               </Tooltip>
+            ) : isRunning ? (
+              <>
+                <Tooltip title="Pause" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="pause"
+                    onClick={() => handlePause(params.row)}
+                  >
+                    <Pause />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Stop" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="stop"
+                    onClick={() => handleStop(params.row)}
+                  >
+                    <Stop />
+                  </IconButton>
+                </Tooltip>
+              </>
+            ) : isPaused ? (
+              <>
+                <Tooltip title="Resume" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="resume"
+                    onClick={() => handleResume(params.row)}
+                  >
+                    <PlayArrow />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Stop" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="stop"
+                    onClick={() => handleStop(params.row)}
+                  >
+                    <Stop />
+                  </IconButton>
+                </Tooltip>
+              </>
             ) : (
-              <Tooltip title="Restart analysis" placement="top">
+              <Tooltip title="Reconfigure" placement="top">
                 <span>
                   <IconButton
                     edge="end"
-                    aria-label="restart"
-                    disabled={isRunning}
-                    onClick={() => handleRestartClick(params.row)}
+                    aria-label="reconfigure"
+                    onClick={() => navigate(`/evidences/${params.row.id}?configure=true`)}
                   >
                     <RestartAlt />
                   </IconButton>
                 </span>
               </Tooltip>
             )}
-            <Tooltip title="Configure & Run" placement="top">
-              <span>
-                <IconButton
-                  edge="end"
-                  aria-label="configure"
-                  disabled={isRunning}
-                  onClick={() => navigate(`/evidences/${params.row.id}?configure=true`)}
-                >
-                  <Tune />
-                </IconButton>
-              </span>
-            </Tooltip>
             <Tooltip title="Delete" placement="right">
               <span>
                 <IconButton
                   edge="end"
                   aria-label="delete"
-                  disabled={isRunning}
+                  disabled={isExtracting}
                   onClick={() => handleDeleteClick(params.row)}
                 >
                   <DeleteSweep />
@@ -507,27 +572,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
           setSelectionModel(newSelection)
         }
       />
-      <Dialog
-        open={openRestartDialog}
-        onClose={() => setOpenRestartDialog(false)}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
-      >
-        <DialogTitle id="alert-dialog-title">Restart the analysis</DialogTitle>
-        <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            You are about to restart the analysis, confirm ?
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenRestartDialog(false)} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmRestart} color="primary" autoFocus>
-            Restart
-          </Button>
-        </DialogActions>
-      </Dialog>
     </>
   );
 }

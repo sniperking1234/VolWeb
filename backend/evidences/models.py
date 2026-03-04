@@ -26,6 +26,8 @@ class Evidence(models.Model):
     os = models.CharField(max_length=10, choices=OS)
     linked_case = models.ForeignKey(Case, on_delete=models.CASCADE, null=False)
     status = models.IntegerField(default=0)
+    extraction_control = models.CharField(max_length=20, default="idle")
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
     access_key_id = models.TextField(null=True)
     access_key = models.TextField(null=True)
     url = models.TextField(null=True)

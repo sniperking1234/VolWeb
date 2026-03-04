@@ -17,7 +17,8 @@ import ExploreLinux from "../../components/Explore/Linux/Explore";
 import ExploreWin from "../../components/Explore/Windows/Explore";
 import { Evidence } from "../../types";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
-import { Biotech, BlurOn } from "@mui/icons-material";
+import { ArrowBack, Biotech, BlurOn } from "@mui/icons-material";
+import IconButton from "@mui/material/IconButton";
 import { useSnackbar } from "../../components/SnackbarProvider";
 
 interface TabPanelProps {
@@ -100,12 +101,16 @@ const EvidenceDetail: React.FC = () => {
 
   return (
     <Box sx={{ width: "100%" }}>
-      <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+      <Box sx={{ display: "flex", alignItems: "center", borderBottom: 1, borderColor: "divider" }}>
+        <IconButton onClick={() => navigate("/evidences")} size="small" sx={{ ml: 1 }}>
+          <ArrowBack />
+        </IconButton>
         <Tabs
           variant="fullWidth"
           value={value}
           onChange={handleChange}
           sx={{
+            flex: 1,
             "& .MuiTabs-indicator": {
               backgroundColor: "error.main",
             },

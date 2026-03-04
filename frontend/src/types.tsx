@@ -34,6 +34,7 @@ export interface Evidence {
   name: string;
   os: string;
   status: number;
+  extraction_control?: string;
 }
 
 export interface CloudStorage {

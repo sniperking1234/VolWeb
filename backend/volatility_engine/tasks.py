@@ -10,22 +10,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-@shared_task(name="VolWeb.Engine")
-def start_extraction(evidence_id, smart_rerun=False):
-    """
-    This task will extract all the artefacts using different plugins.
-    If smart_rerun=True, skip plugins that already completed successfully.
-    """
-    instance = Evidence.objects.get(id=evidence_id)
-    engine = VolatilityEngine(instance)
-    instance.status = 0
-    instance.save()
-    engine.start_extraction(smart_rerun=smart_rerun)
-    if instance.status != -1:
-        instance.status = 100
-        instance.save()
-
-
 @shared_task(name="VolWeb.SelectiveEngine")
 def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=None, skip_completed=False, plugin_timeout=None):
     """
@@ -36,7 +20,10 @@ def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=No
     instance = Evidence.objects.get(id=evidence_id)
     engine = VolatilityEngine(instance)
     instance.status = 0
+    instance.extraction_control = "running"
     instance.save()
+
+    logger.info(f"Starting selective extraction for evidence {evidence_id} — plugins: {len(selected_plugins) if selected_plugins else 'all'}, timeout: {f'{plugin_timeout}s' if plugin_timeout else 'none'}")
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
@@ -51,11 +38,18 @@ def start_selective_extraction(evidence_id, selected_plugins=None, pid_filter=No
         },
     )
 
-    engine.start_selective_extraction(selected_plugins, pid_filter, skip_completed=skip_completed, plugin_timeout=plugin_timeout)
+    try:
+        engine.start_selective_extraction(selected_plugins, pid_filter, skip_completed=skip_completed, plugin_timeout=plugin_timeout)
 
-    if instance.status != -1:
-        instance.status = 100
-        instance.save()
+        if instance.status != -1:
+            instance.refresh_from_db()
+            instance.status = 100
+            instance.save(update_fields=["status"])
+    finally:
+        instance.refresh_from_db()
+        instance.extraction_control = "idle"
+        instance.celery_task_id = ""
+        instance.save(update_fields=["extraction_control", "celery_task_id"])
 
     async_to_sync(channel_layer.group_send)(
         f"volatility_tasks_{evidence_id}",
