@@ -19,6 +19,7 @@ import {
   AccordionSummary,
   AccordionDetails,
   Tooltip,
+  InputAdornment,
 } from "@mui/material";
 import {
   ArrowBack,
@@ -32,6 +33,7 @@ import {
   RemoveCircleOutline,
   Timer,
   TimerOff,
+  Search,
 } from "@mui/icons-material";
 import axiosInstance from "../../utils/axiosInstance";
 import { AvailablePlugin, AvailablePluginsResponse } from "../../types";
@@ -91,6 +93,7 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
   const [hasExecutedPlugins, setHasExecutedPlugins] = useState(false);
   const [enableTimeout, setEnableTimeout] = useState(false);
   const [pluginTimeout, setPluginTimeout] = useState<string>("600");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const requiredPlugins = REQUIRED_PLUGINS[evidenceOs] || [];
 
@@ -401,16 +404,40 @@ const PluginSelector: React.FC<PluginSelectorProps> = ({
 
         <Divider sx={{ mb: 2 }} />
 
+        <TextField
+          size="small"
+          placeholder="Search plugins..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          sx={{ mb: 2, width: 300 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+        />
+
         {/* Category accordions */}
         {Object.keys(categories).sort().map((category) => {
-          const plugins = getCategoryPlugins(category);
+          const allPlugins = getCategoryPlugins(category);
+          const query = searchQuery.toLowerCase();
+          const plugins = query
+            ? allPlugins.filter(
+                (p) =>
+                  p.name.toLowerCase().includes(query) ||
+                  (p.description && p.description.toLowerCase().includes(query))
+              )
+            : allPlugins;
+          if (plugins.length === 0) return null;
           const selectedCount = getSelectedCountForCategory(category);
           const allCategorySelected = selectedCount === plugins.length;
           const someCategorySelected = selectedCount > 0 && !allCategorySelected;
           const color = categoryColors[category] || "info";
 
           return (
-            <Accordion key={category} defaultExpanded={false}>
+            <Accordion key={`${category}-${searchQuery ? "search" : "browse"}`} defaultExpanded={!!searchQuery}>
               <AccordionSummary expandIcon={<ExpandMore />}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 2, width: "100%" }}>
                   <Checkbox
