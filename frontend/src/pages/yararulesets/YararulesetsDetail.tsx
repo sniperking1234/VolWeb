@@ -55,7 +55,7 @@ const RulesetDetail: React.FC = () => {
         </Grid>
         <Grid size={12}>
           <Typography variant="h5" component="div" sx={{ marginBottom: 2 }}>
-            Linked evidences
+            Linked rules
           </Typography>
           <Divider sx={{ marginBottom: 2 }} />
           <YaraRuleList yararuleset={rulesetDetail} />
