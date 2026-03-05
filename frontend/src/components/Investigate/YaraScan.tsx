@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Paper,
+  TextField,
   Typography,
   Grid,
   List,
@@ -24,6 +25,7 @@ import {
   Delete,
   Close as CloseIcon,
 } from "@mui/icons-material";
+import SearchIcon from '@mui/icons-material/Search';
 import { DataGrid, GridColDef, useGridApiRef } from "@mui/x-data-grid";
 import axiosInstance from "../../utils/axiosInstance";
 import { YaraRuleSet, YaraRule, TaskData } from "../../types";
@@ -56,6 +58,8 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
   const [processing, setProcessing] = useState(false);
   const [hasResults, setHasResults] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistory[]>([]);
+  const [rulesetSearch, setRulesetSearch] = useState<string>("");
+  const [ruleSearch, setRuleSearch] = useState<string>("");
   const [currentScanId, setCurrentScanId] = useState<string>("");
   const [transitioning, setTransitioning] = useState(false);
 
@@ -459,26 +463,18 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
             <Grid container spacing={3}>
               <Grid size={6}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                  <Typography variant="h6">
-                    Available Rulesets
-                  </Typography>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={rulesets.length > 0 && selectedRulesets.length === rulesets.length}
-                        indeterminate={selectedRulesets.length > 0 && selectedRulesets.length < rulesets.length}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRulesets(rulesets.map(r => r.id));
-                          } else {
-                            setSelectedRulesets([]);
-                          }
-                        }}
-                      />
-                    }
-                    label="Select All"
-                  />
-                </Box>
+                    <Typography variant="h6">Available Rulesets</Typography>
+                    <TextField
+                      size="small"
+                      placeholder="Search rulesets"
+                      value={rulesetSearch}
+                      onChange={(e) => setRulesetSearch(e.target.value)}
+                      InputProps={{
+                        startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} />,
+                      }}
+                      sx={{ width: 240 }}
+                    />
+                  </Box>
                 <Divider sx={{ mb: 2 }} />
                 
                 {rulesets.length === 0 ? (
@@ -488,7 +484,9 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
                 ) : (
                   <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto", p: 2 }}>
                     <List dense>
-                      {rulesets.map((ruleset) => (
+                      {rulesets
+                        .filter(rs => rs.name.toLowerCase().includes(rulesetSearch.toLowerCase()))
+                        .map((ruleset) => (
                         <ListItem key={ruleset.id} sx={{ py: 1 }}>
                           <Checkbox
                             checked={selectedRulesets.includes(ruleset.id)}
@@ -511,21 +509,15 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
                   <Typography variant="h6">
                     Individual Rules
                   </Typography>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        checked={rules.length > 0 && selectedRules.length === rules.length}
-                        indeterminate={selectedRules.length > 0 && selectedRules.length < rules.length}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedRules(rules.map(r => r.id));
-                          } else {
-                            setSelectedRules([]);
-                          }
-                        }}
-                      />
-                    }
-                    label="Select All"
+                  <TextField
+                    size="small"
+                    placeholder="Search rules"
+                    value={ruleSearch}
+                    onChange={(e) => setRuleSearch(e.target.value)}
+                    InputProps={{
+                      startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} />,
+                    }}
+                    sx={{ width: 240 }}
                   />
                 </Box>
                 <Divider sx={{ mb: 2 }} />
@@ -537,7 +529,9 @@ const YaraScan: React.FC<YaraScanProps> = ({ evidenceId }) => {
                 ) : (
                   <Paper variant="outlined" sx={{ maxHeight: 400, overflow: "auto", p: 2 }}>
                     <List dense>
-                      {rules.map((rule) => (
+                      {rules
+                        .filter(r => r.name.toLowerCase().includes(ruleSearch.toLowerCase()))
+                        .map((rule) => (
                         <ListItem key={rule.id} sx={{ py: 1 }}>
                           <Checkbox
                             checked={selectedRules.includes(rule.id)}

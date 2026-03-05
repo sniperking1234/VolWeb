@@ -13,6 +13,8 @@ import {
   Tooltip,
   Fab,
   Chip,
+  TextField,
+  Box,
 } from "@mui/material";
 import {
   DeleteSweep,
@@ -28,6 +30,7 @@ import AddRuleSetDialog from "../Dialogs/YaraRuleSetCreationDialog";
 import LinearProgressBar from "../LinearProgressBar";
 import { YaraRuleSet } from "../../types";
 import { useSnackbar } from "../SnackbarProvider";
+import SearchIcon from '@mui/icons-material/Search';
 
 function RulesetList() {
   const navigate = useNavigate();
@@ -40,6 +43,7 @@ function RulesetList() {
   const [openRestartDialog, setOpenRestartDialog] = useState<boolean>(false);
   const [rulesetDialogOpen, setRulesetDialogOpen] = useState(false);
   const [rulesetData, setRulesetData] = useState<YaraRuleSet[]>([]);
+  const [rulesetFilter, setRulesetFilter] = useState<string>("");
   const [deleteMultiple, setDeleteMultiple] = useState(false);
 
   const [isConnected, setIsConnected] = useState(false);
@@ -265,11 +269,22 @@ function RulesetList() {
 
   return (
     <>
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <TextField
+          size="small"
+          placeholder="Search rulesets"
+          value={rulesetFilter}
+          onChange={(e) => setRulesetFilter(e.target.value)}
+          InputProps={{ startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} /> }}
+          sx={{ width: 360 }}
+        />
+      </Box>
+
       <DataGrid
         rowHeight={60}
         disableRowSelectionOnClick
         columns={columns}
-        rows={rulesetData}
+        rows={rulesetData.filter(rs => rs.name.toLowerCase().includes(rulesetFilter.toLowerCase()))}
         loading={!isConnected}
         checkboxSelection
         disableRowSelectionExcludeModel

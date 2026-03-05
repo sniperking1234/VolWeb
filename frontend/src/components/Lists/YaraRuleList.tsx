@@ -7,6 +7,8 @@ import {
 } from "@mui/x-data-grid";
 import {
   Button,
+  Box,
+  TextField,
   Chip,
   Dialog,
   DialogActions,
@@ -17,6 +19,7 @@ import {
   IconButton,
   Tooltip,
 } from "@mui/material";
+import SearchIcon from '@mui/icons-material/Search';
 import {
   DeleteSweep,
   Visibility,
@@ -54,6 +57,7 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   const [openViewDialog, setOpenViewDialog] = useState(false);
   const [openCreationDialog, setOpenCreationDialog] = useState(false);
   const [openNewRuleDialog, setOpenNewRuleDialog] = useState(false);
+  const [ruleFilter, setRuleFilter] = useState<string>("");
   const [selectedYaraRule, setSelectedYaraRule] = useState<YaraRule | null>(
     null
   );
@@ -540,10 +544,26 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         yara_ruleset={yararuleset}
       />
 
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <TextField
+          size="small"
+          placeholder="Search rules by name or description"
+          value={ruleFilter}
+          onChange={(e) => setRuleFilter(e.target.value)}
+          InputProps={{
+            startAdornment: <SearchIcon fontSize="small" sx={{ mr: 1 }} />,
+          }}
+          sx={{ width: 360 }}
+        />
+      </Box>
+
       <DataGrid
         getRowHeight={() => "auto"}
         disableRowSelectionOnClick
-        rows={yararuleData}
+        rows={yararuleData.filter(r => (
+          r.name.toLowerCase().includes(ruleFilter.toLowerCase()) ||
+          (r.description || "").toLowerCase().includes(ruleFilter.toLowerCase())
+        ))}
         columns={columns}
         loading={!isConnected}
         checkboxSelection
