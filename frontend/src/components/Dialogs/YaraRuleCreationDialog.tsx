@@ -9,6 +9,7 @@ import {
   FormControl,
   Autocomplete,
   LinearProgress,
+  CircularProgress,
   Box,
   Typography,
   Link,
@@ -250,13 +251,35 @@ const YaraRuleCreationDialog: React.FC<YaraRuleCreationDialogProps> = ({
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>
-        <Tabs value={tabIndex} onChange={(_, val) => setTabIndex(val)}>
-          <Tab label="Upload from File" />
-          <Tab label="Import from GitHub" />
+        <Tabs value={tabIndex} onChange={(_, val) => { if (!uploading && !importing) setTabIndex(val); }}>
+          <Tab label="Upload from File" disabled={uploading || importing} />
+          <Tab label="Import from GitHub" disabled={uploading || importing} />
         </Tabs>
       </DialogTitle>
       <DialogContent dividers>
-        {tabIndex === 0 ? (
+        {uploading ? (
+          <Box sx={{ textAlign: "center", py: 4 }}>
+            <Typography variant="body1" gutterBottom>
+              Uploading file...
+            </Typography>
+            <LinearProgress variant="determinate" value={uploadProgress || 0} sx={{ my: 2 }} />
+            <Typography variant="body2" color="text.secondary">
+              {uploadProgress}%
+            </Typography>
+            {uploadError && <Alert severity="error" sx={{ mt: 2 }}>{uploadError}</Alert>}
+          </Box>
+        ) : importing ? (
+          <Box sx={{ textAlign: "center", py: 4 }}>
+            <CircularProgress sx={{ mb: 2 }} />
+            <Typography variant="body1">
+              Importing from GitHub...
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              This may take a while depending on the repository size.
+            </Typography>
+            {githubError && <Alert severity="error" sx={{ mt: 2 }}>{githubError}</Alert>}
+          </Box>
+        ) : tabIndex === 0 ? (
           <>
             <FormControl fullWidth margin="normal">
               <InputLabel id="upload-mode-label">Upload Mode</InputLabel>
@@ -311,12 +334,6 @@ const YaraRuleCreationDialog: React.FC<YaraRuleCreationDialogProps> = ({
               <input type="file" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </Button>
             {file && <div style={{ marginTop: 8 }}>Selected: {file.name}</div>}
-            {uploading && (
-              <Box mt={2}>
-                <LinearProgress variant="determinate" value={uploadProgress || 0} />
-                <Typography>{uploadProgress}%</Typography>
-              </Box>
-            )}
             {uploadError && <Alert severity="error">{uploadError}</Alert>}
           </>
         ) : (

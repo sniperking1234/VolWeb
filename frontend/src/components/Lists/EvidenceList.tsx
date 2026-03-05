@@ -7,7 +7,6 @@ import {
   GridRowSelectionModel,
 } from "@mui/x-data-grid";
 import axiosInstance from "../../utils/axiosInstance";
-import { AxiosError } from "axios";
 import EvidenceCreationDialog from "../Dialogs/EvidenceCreationDialog";
 import LinearProgressWithLabel from "../LinearProgressBar";
 import {
@@ -147,26 +146,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       }
     };
   }, [caseId, display_message]);
-
-  const handleCreateSuccess = () => {
-    display_message("success", "Evidence created.");
-  };
-
-  const handleCreateFailed = (error: unknown) => {
-    console.log(error);
-    display_message("success", "Evidence created.");
-
-    display_message(
-      "error",
-      `Evidence could not be created: ${
-        error instanceof AxiosError && error.response
-          ? Object.entries(error.response.data)
-              .map(([key, value]) => `${key}: ${value}`)
-              .join(", ")
-          : "Unknown error"
-      }`,
-    );
-  };
 
   const handleBindSuccess = () => {
     display_message("success", "Evidence binded.");
@@ -500,8 +479,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
         onClose={() => {
           setOpenCreationDialog(false);
         }}
-        onCreateSuccess={handleCreateSuccess}
-        onCreateFailed={handleCreateFailed}
         caseId={caseId}
       />
       <Fab

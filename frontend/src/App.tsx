@@ -23,6 +23,7 @@ import Yararuleset from "./pages/yararulesets/Yararulesets";
 import YararulesetDetail from "./pages/yararulesets/YararulesetsDetail";
 import EvidenceDetail from "./pages/evidences/EvidenceDetails";
 import { SnackbarProvider } from "./components/SnackbarProvider";
+import { EvidenceUploadProvider } from "./components/EvidenceUploadProvider";
 
 const darkTheme = createTheme({
   palette: {
@@ -47,7 +48,9 @@ const App: React.FC = () => {
             element={
               <PrivateRoute>
               <SnackbarProvider>
+              <EvidenceUploadProvider>
                 <MiniDrawer />
+              </EvidenceUploadProvider>
               </SnackbarProvider>
               </PrivateRoute>
             }

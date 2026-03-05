@@ -8,27 +8,24 @@ import {
   TextField,
   Select,
   MenuItem,
-  LinearProgress,
   FormControl,
   InputLabel,
   Autocomplete,
   CircularProgress,
 } from "@mui/material";
 import axiosInstance from "../../utils/axiosInstance";
-import { Evidence, Case } from "../../types";
+import { Case } from "../../types";
+import { useEvidenceUpload } from "../EvidenceUploadProvider";
+
 interface EvidenceCreationDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreateSuccess: (newEvidence: Evidence) => void;
-  onCreateFailed: (error: unknown) => void;
   caseId?: number;
 }
 
 const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
   open,
   onClose,
-  onCreateSuccess,
-  onCreateFailed,
   caseId,
 }) => {
   const OS_OPTIONS = [
@@ -36,35 +33,19 @@ const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
     { value: "linux", label: "Linux" },
   ];
 
+  const { uploadState, startUpload, cancelUpload } = useEvidenceUpload();
+
   const [os, setOs] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploading, setUploading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const [cases, setCases] = useState<Case[]>([]);
   const [selectedEvidence, setSelectedEvidence] = useState<Case | null>(null);
   const [evidenceLoading, setEvidencesLoading] = useState<boolean>(false);
 
-  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
-
-  const createFileChunks = (file: File) => {
-    const chunks = [];
-    let currentPointer = 0;
-
-    while (currentPointer < file.size) {
-      const chunk = file.slice(currentPointer, currentPointer + CHUNK_SIZE);
-      chunks.push(chunk);
-      currentPointer += CHUNK_SIZE;
-    }
-
-    return chunks;
-  };
-
   useEffect(() => {
     if (open) {
       if (caseId) {
-        // If caseId is provided, set the selectedEvidence directly
         setSelectedEvidence({ id: caseId } as Case);
         setEvidencesLoading(false);
       } else {
@@ -86,71 +67,20 @@ const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
     }
   };
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     if (!os || !file || (!selectedEvidence && !caseId)) {
       setError("Please fill in all fields.");
       return;
     }
 
-    setUploading(true);
-    setError(null);
-
     const uploadCaseId = caseId || selectedEvidence?.id;
+    if (!uploadCaseId) return;
 
-    try {
-      const initiateResponse = await axiosInstance.post(
-        `/api/cases/upload/initiate/`,
-        {
-          filename: file.name,
-          case_id: uploadCaseId,
-          os: os,
-        },
-      );
-      const uploadId = initiateResponse.data.upload_id;
-
-      const chunks = createFileChunks(file);
-
-      let uploadedSize = 0;
-
-      for (let index = 0; index < chunks.length; index++) {
-        const chunk = chunks[index];
-        const partNumber = index + 1;
-
-        const formData = new FormData();
-        formData.append("chunk", chunk, file.name + ".part" + partNumber);
-        formData.append("upload_id", uploadId);
-        formData.append("part_number", partNumber.toString());
-        formData.append("filename", file.name);
-
-        await axiosInstance.post(`/api/cases/upload/chunk/`, formData);
-
-        uploadedSize += chunk.size;
-        const percentage = Math.round((uploadedSize / file.size) * 100);
-        setUploadProgress(percentage);
-      }
-
-      try {
-        const completeUploadResponse = await axiosInstance.post(
-          `/api/cases/upload/complete/`,
-          {
-            upload_id: uploadId,
-          },
-        );
-        onCreateSuccess(completeUploadResponse.data);
-      } catch (error) {
-        console.error("Complete upload failed:", error);
-        onCreateFailed(error);
-      }
-      onClose();
-      setUploading(false);
-      setOs("");
-      setFile(null);
-      setUploadProgress(null);
-    } catch (err) {
-      console.error("Upload error:", err);
-      setError(`Upload failed: ${err}`);
-      setUploading(false);
-    }
+    startUpload({ file, caseId: uploadCaseId, os });
+    setOs("");
+    setFile(null);
+    setError(null);
+    onClose();
   };
 
   return (
@@ -215,16 +145,6 @@ const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
             {file && (
               <div style={{ marginTop: 8 }}>Selected File: {file.name}</div>
             )}
-
-            {uploading && (
-              <div style={{ marginTop: 16 }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={uploadProgress || 0}
-                />
-                <div>{uploadProgress}%</div>
-              </div>
-            )}
             {error && (
               <div style={{ color: "red", marginTop: 16 }}>{error}</div>
             )}
@@ -232,7 +152,7 @@ const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={uploading || evidenceLoading}>
+        <Button onClick={onClose} disabled={evidenceLoading}>
           Cancel
         </Button>
         <Button
@@ -240,7 +160,9 @@ const EvidenceCreationDialog: React.FC<EvidenceCreationDialogProps> = ({
           variant="outlined"
           color="error"
           disabled={
-            uploading || (!selectedEvidence && !caseId) || evidenceLoading
+            uploadState.uploading ||
+            (!selectedEvidence && !caseId) ||
+            evidenceLoading
           }
         >
           Upload
