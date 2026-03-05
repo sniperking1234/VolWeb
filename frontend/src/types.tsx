@@ -178,7 +178,7 @@ export interface YaraRuleSet {
   id: number;
   name: string; 
   description: string;
-  rules: YaraRule[];
+  rules: number[];
   status?: number;
 }
 

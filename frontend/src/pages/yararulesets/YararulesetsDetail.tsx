@@ -8,6 +8,7 @@ import {
   Card,
   CardContent,
   Divider,
+  Box,
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import YaraRuleList from "../../components/Lists/YaraRuleList";
@@ -44,12 +45,21 @@ const RulesetDetail: React.FC = () => {
         <Grid size={12}>
           <Card variant="outlined" sx={{ marginBottom: 2 }}>
             <CardContent>
-              <Typography variant="h5" component="div">
-                {rulesetDetail.name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {rulesetDetail.description}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography variant="h5" component="div">
+                    {rulesetDetail.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {rulesetDetail.description}
+                  </Typography>
+                </Box>
+                <Box sx={{ textAlign: 'right' }}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Rules: {rulesetDetail.rules ? rulesetDetail.rules.length : 0}
+                  </Typography>
+                </Box>
+              </Box>
             </CardContent>
           </Card>
         </Grid>

@@ -9,6 +9,9 @@ from .models import YaraRule
 from .serializers import YaraRuleSerializer
 import yara
 import logging
+from rest_framework.decorators import action
+
+from yararules.utils import batch_upload_context, trigger_delayed_ruleset_validation
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,39 @@ class YaraRuleViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(linked_yararuleset=linked_yararuleset)
             
         return queryset
+
+    @action(detail=False, methods=["post"])
+    def bulk_delete(self, request):
+        """
+        Delete multiple YARA rules in a single request and trigger a single
+        ruleset validation per affected ruleset after deletion.
+        Expected payload: { "ids": [1,2,3] }
+        """
+        ids = request.data.get("ids", [])
+        if not isinstance(ids, list) or not ids:
+            return Response({"error": "No ids provided"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Determine affected ruleset ids
+            affected_ruleset_ids = list(
+                YaraRule.objects.filter(id__in=ids).values_list("linked_yararuleset_id", flat=True)
+            )
+            # Filter out None and duplicates
+            affected_ruleset_ids = list({r for r in affected_ruleset_ids if r})
+
+            # Perform bulk delete inside batch context to suppress per-delete revalidation
+            with batch_upload_context():
+                deleted_count, _ = YaraRule.objects.filter(id__in=ids).delete()
+
+            # Trigger a delayed validation for each affected ruleset
+            for rs_id in affected_ruleset_ids:
+                trigger_delayed_ruleset_validation(rs_id, delay=3)
+
+            return Response({"deleted": deleted_count}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logging.exception("Failed to bulk delete yara rules")
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['post'])
     def validate(self, request):

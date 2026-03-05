@@ -6,6 +6,7 @@ from yararules.utils import is_batch_upload_active
 from volatility_engine.tasks import start_yararule_validation, start_ruleset_validation
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+import logging
 
 @receiver(post_save, sender=YaraRule)
 def send_yara_rule_created(sender, instance, created, **kwargs):
@@ -48,4 +49,21 @@ def send_yara_rule_deleted(sender, instance, **kwargs):
         "yararules", 
         {"type": "send_notification", "status": "deleted", "message": deleted_rule_data},
     )
+    
+    # If the deleted rule was linked to a ruleset, trigger ruleset re-validation
+    try:
+        ruleset_id = getattr(instance, 'linked_yararuleset_id', None)
+        if ruleset_id and not is_batch_upload_active():
+            # Attempt to mark ruleset as needing recompilation and enqueue validation
+            try:
+                from yararulesets.models import YaraRuleSet
+                ruleset = YaraRuleSet.objects.get(id=ruleset_id)
+                ruleset.status = 0
+                ruleset.save(update_fields=['status'])
+                start_ruleset_validation.apply_async(args=[ruleset.id])
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to trigger ruleset validation after rule delete: {e}")
+    except Exception:
+        # Defensive: do not let signal failures propagate
+        logging.getLogger(__name__).exception("Unexpected error in send_yara_rule_deleted signal")
     

@@ -317,11 +317,17 @@ def start_yarascan(evidence_id, rulesets=None, rules=None):
             
             for ruleset_id in rulesets:
                 try:
-                    ruleset = YaraRuleSet.objects.get(id=ruleset_id, status=100)
-                    selected_rulesets.append(ruleset)
-                    logger.info(f"Added ruleset '{ruleset.name}' to scan")
+                    # Try to fetch the ruleset regardless of its status. We will
+                    # only include it in the scan if it has compiled rules.
+                    ruleset = YaraRuleSet.objects.get(id=ruleset_id)
+
+                    if getattr(ruleset, 'compiled_rules', None):
+                        selected_rulesets.append(ruleset)
+                        logger.info(f"Added ruleset '{ruleset.name}' to scan")
+                    else:
+                        logger.warning(f"Ruleset {ruleset_id} found but not compiled yet; skipping")
                 except YaraRuleSet.DoesNotExist:
-                    logger.warning(f"Ruleset {ruleset_id} not found or not compiled")
+                    logger.warning(f"Ruleset {ruleset_id} not found")
             
             if selected_rulesets:
                 logger.info(f"Running YARA scan with {len(selected_rulesets)} rulesets combined")

@@ -221,9 +221,8 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     try {
       if (deleteMultiple) {
         const idsToDelete = [...(selectionModel as any).ids] as number[];
-        await Promise.all(
-          idsToDelete.map((id) => axiosInstance.delete(`/api/yararules/${id}/`))
-        );
+        // Use bulk delete endpoint to avoid per-delete ruleset recompilation
+        await axiosInstance.post(`/api/yararules/bulk_delete/`, { ids: idsToDelete });
         display_message("success", "Selected yara rules deleted successfully");
         setSelectionModel({ type: "include", ids: new Set<number>() });
       } else if (yaraRuleToDelete) {
