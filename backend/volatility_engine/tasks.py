@@ -234,26 +234,26 @@ def start_yararule_validation(yara_rule_id):
 
 
 @shared_task
-def start_ruleset_validation(yara_ruleset_id):
+def start_ruleset_validation(yara_ruleset_id, skip_rule_validation=False):
     """
-    This task will validate the YARA rule and recompile the ruleset.
-    
-    No changes needed here - this task can run independently
+    Recompile a YARA ruleset.
+    skip_rule_validation: skip per-rule revalidation (use after deletion —
+                          remaining rules are already compiled).
     """
     instance = YaraRuleSet.objects.get(id=yara_ruleset_id)
-    
+
     logger.info(f"Starting validation for YARA ruleset: {instance.name} (ID: {yara_ruleset_id})")
-    
+
     channel_layer = get_channel_layer()
 
     engine = VolatilityEngine(instance)
-    
+
     # Set status to in-progress
     instance.status = 0
     instance.save()
-    
+
     # Perform the actual validation
-    validation_result = engine.start_ruleset_validation()
+    validation_result = engine.start_ruleset_validation(skip_rule_validation=skip_rule_validation)
     
     # Save the result
     instance.status = validation_result

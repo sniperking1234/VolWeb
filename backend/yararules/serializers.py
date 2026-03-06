@@ -7,9 +7,32 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class YaraRuleListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list views — excludes rule_content."""
+    ruleset_name = serializers.CharField(source='linked_yararuleset.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = YaraRule
+        exclude = ['rule_content']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        try:
+            if hasattr(instance, 'linked_yararuleset') and instance.linked_yararuleset:
+                data['linked_yararuleset'] = {
+                    'id': instance.linked_yararuleset.id,
+                    'name': instance.linked_yararuleset.name
+                }
+            else:
+                data['linked_yararuleset'] = None
+        except YaraRuleSet.DoesNotExist:
+            data['linked_yararuleset'] = None
+        return data
+
+
 class YaraRuleSerializer(serializers.ModelSerializer):
     ruleset_name = serializers.CharField(source='linked_yararuleset.name', read_only=True, allow_null=True)
-    
+
     class Meta:
         model = YaraRule
         fields = "__all__"

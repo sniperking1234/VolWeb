@@ -146,24 +146,21 @@ def is_batch_upload_active():
     return getattr(_local, 'batch_upload_active', False)
 
 
-def trigger_delayed_ruleset_validation(ruleset_id, delay=5):
+def trigger_delayed_ruleset_validation(ruleset_id, delay=5, skip_rule_validation=False):
     """
     Trigger ruleset validation with a delay to ensure all rules are processed.
-    
-    Args:
-        ruleset_id (int): ID of the ruleset to validate
-        delay (int): Delay in seconds before starting validation
+    skip_rule_validation: skip per-rule revalidation (pass True after deletion).
     """
     if not ruleset_id:
         return
-        
+
     logger.info(f"Scheduling delayed ruleset validation for ruleset {ruleset_id} with {delay}s delay")
-    
-    # Import here to avoid circular imports
+
     from volatility_engine.tasks import start_ruleset_validation
-    
+
     start_ruleset_validation.apply_async(
         args=[ruleset_id],
+        kwargs={"skip_rule_validation": skip_rule_validation},
         countdown=delay
     )
 

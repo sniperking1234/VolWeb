@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   DataGrid,
   GridColDef,
+  GridPaginationModel,
   GridRenderCellParams,
   GridRowSelectionModel,
 } from "@mui/x-data-grid";
@@ -24,11 +25,9 @@ import {
   DeleteSweep,
   Visibility,
   RestartAlt,
-  Add as AddIcon,
   Delete as DeleteIcon,
   Memory,
   Info,
-  DataObject,
   ViewModule,
   Source,
   Fingerprint,
@@ -49,8 +48,9 @@ interface YaraRuleListProps {
 
 function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   const { display_message } = useSnackbar();
-  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [yararuleData, setYararuleData] = useState<YaraRule[]>([]);
+  const [rowCount, setRowCount] = useState(0);
   const [allYaraRuleSets, setAllYaraRuleSets] = useState<YaraRuleSet[]>([]);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [openRestartDialog, setOpenRestartDialog] = useState(false);
@@ -58,6 +58,12 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
   const [openCreationDialog, setOpenCreationDialog] = useState(false);
   const [openNewRuleDialog, setOpenNewRuleDialog] = useState(false);
   const [ruleFilter, setRuleFilter] = useState<string>("");
+  const [debouncedFilter, setDebouncedFilter] = useState<string>("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
+    page: 0,
+    pageSize: 50,
+  });
   const [selectedYaraRule, setSelectedYaraRule] = useState<YaraRule | null>(
     null
   );
@@ -78,37 +84,40 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
       ids: new Set<number>(),
     });
 
-  const selectedIds = [...(selectionModel as any).ids] as number[];
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFilter(ruleFilter);
+      setPaginationModel((prev) => ({ ...prev, page: 0 }));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [ruleFilter]);
+
+  const fetchYaraRules = useCallback(async (page: number, pageSize: number, search: string) => {
+    setIsLoading(true);
+    try {
+      const params: Record<string, string | number> = {
+        page: page + 1, // DRF pages are 1-indexed
+        page_size: pageSize,
+      };
+      if (search) params.search = search;
+      if (yararuleset) params.linked_yararuleset = yararuleset.id;
+
+      const response = await axiosInstance.get("/api/yararules/", { params });
+      setYararuleData(response.data.results);
+      setRowCount(response.data.count);
+    } catch (error) {
+      console.error("Error fetching data", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [yararuleset]);
 
   useEffect(() => {
-    const fetchYaraRules = async () => {
-      try {
-        const response = await axiosInstance.get("/api/yararules/");
-        const data: YaraRule[] = response.data;
-        const yaraRulesUpdated = data.map((d) => ({
-          ...d,
-          ruleset_name: d.linked_yararuleset?.name || "No ruleset",
-        }));
+    fetchYaraRules(paginationModel.page, paginationModel.pageSize, debouncedFilter);
+  }, [paginationModel.page, paginationModel.pageSize, debouncedFilter, fetchYaraRules, refreshKey]);
 
-        if (yararuleset) {
-          const filteredData = yaraRulesUpdated.filter((rule: YaraRule) => {
-            const rulesetId =
-              typeof rule.linked_yararuleset === "object"
-                ? rule.linked_yararuleset?.id
-                : (rule.linked_yararuleset as unknown as number) || null;
-            return rulesetId === yararuleset.id;
-          });
-          setYararuleData(filteredData);
-        } else {
-          setYararuleData(yaraRulesUpdated);
-        }
-        setIsConnected(true);
-      } catch (error) {
-        console.error("Error fetching data", error);
-        setIsConnected(false);
-      }
-    };
-
+  useEffect(() => {
     const fetchAllRuleSets = async () => {
       try {
         const response = await axiosInstance.get("/api/yararulesets/");
@@ -117,10 +126,8 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         console.error("Error fetching rulesets", error);
       }
     };
-
-    fetchYaraRules();
     fetchAllRuleSets();
-  }, [yararuleset]);
+  }, []);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -132,7 +139,6 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
 
       ws.current.onopen = () => {
         console.log("WebSocket connected (yararules)");
-        setIsConnected(true);
         if (retryInterval.current) {
           clearInterval(retryInterval.current);
           retryInterval.current = null;
@@ -141,7 +147,6 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
 
       ws.current.onclose = () => {
         console.log("WebSocket disconnected (yararules)");
-        setIsConnected(false);
         if (!retryInterval.current) {
           retryInterval.current = window.setTimeout(connectWebSocket, 5000);
           console.log("Attempting to reconnect to WebSocket (yararules)...");
@@ -152,24 +157,14 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         try {
           const data = JSON.parse(event.data);
           const status = data.status;
-          const message: YaraRule = data.message;
 
-          if (status === "created" || status === "updated") {
-            setYararuleData((prevData) => {
-              const exists = prevData.some((r) => r.id === message.id);
-              if (exists) {
-                return prevData.map((r) => (r.id === message.id ? message : r));
-              } else {
-                return [...prevData, message];
-              }
-            });
-          } else if (status === "deleted") {
-            setYararuleData((prevData) =>
-              prevData.filter((r) => r.id !== message.id)
-            );
+          // Re-fetch current page so server-side pagination stays consistent
+          setRefreshKey((k) => k + 1);
+
+          if (status === "deleted") {
             setSelectionModel((prev: any) => ({
               type: "include",
-              ids: new Set([...prev.ids].filter((id: number) => id !== message.id)),
+              ids: new Set([...prev.ids].filter((id: number) => id !== data.message?.id)),
             }));
           }
         } catch (err) {
@@ -234,25 +229,7 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         display_message("success", "Yara rule deleted successfully");
       }
 
-      const response = await axiosInstance.get("/api/yararules/");
-      const data: YaraRule[] = response.data;
-      const yaraRulesUpdated = data.map((d) => ({
-        ...d,
-        ruleset_name: d.linked_yararuleset?.name || "No ruleset",
-      }));
-
-      if (yararuleset) {
-        const filteredData = yaraRulesUpdated.filter((rule: YaraRule) => {
-          const rulesetId =
-            typeof rule.linked_yararuleset === "object"
-              ? rule.linked_yararuleset?.id
-              : (rule.linked_yararuleset as unknown as number) || null;
-          return rulesetId === yararuleset.id;
-        });
-        setYararuleData(filteredData);
-      } else {
-        setYararuleData(yaraRulesUpdated);
-      }
+      fetchYaraRules(paginationModel.page, paginationModel.pageSize, debouncedFilter);
     } catch (error) {
       display_message(
         "error",
@@ -263,8 +240,13 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     }
   };
 
-  const handleViewClick = (row: YaraRule) => {
-    setSelectedYaraRule(row);
+  const handleViewClick = async (row: YaraRule) => {
+    try {
+      const response = await axiosInstance.get(`/api/yararules/${row.id}/`);
+      setSelectedYaraRule(response.data);
+    } catch {
+      setSelectedYaraRule(row);
+    }
     setOpenViewDialog(true);
   };
 
@@ -294,34 +276,8 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
     setOpenNewRuleDialog(true);
   };
 
-  const handleUpdateSuccess = (updatedRule: YaraRule) => {
-    const fetchYaraRules = async () => {
-      try {
-        const response = await axiosInstance.get("/api/yararules/");
-        const data: YaraRule[] = response.data;
-        const yaraRulesUpdated = data.map((d) => ({
-          ...d,
-          ruleset_name: d.linked_yararuleset?.name || "No ruleset",
-        }));
-
-        if (yararuleset) {
-          const filteredData = yaraRulesUpdated.filter(
-            (rule: YaraRule) =>
-              (typeof rule.linked_yararuleset === "object"
-                ? rule.linked_yararuleset?.id
-                : (rule.linked_yararuleset as unknown as number) || null) ===
-              yararuleset.id
-          );
-          setYararuleData(filteredData);
-        } else {
-          setYararuleData(yaraRulesUpdated);
-        }
-      } catch (error) {
-        console.error("Error fetching data", error);
-      }
-    };
-
-    fetchYaraRules();
+  const handleUpdateSuccess = (_updatedRule: YaraRule) => {
+    fetchYaraRules(paginationModel.page, paginationModel.pageSize, debouncedFilter);
   };
 
   const handleDownloadRule = async (ruleId: number, ruleName: string) => {
@@ -482,32 +438,6 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
 
   return (
     <>
-      {/* FAB: upload/import */}
-      <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
-        <Fab
-          color="primary"
-          aria-label="upload"
-          onClick={() => {
-            setOpenCreationDialog(true);
-          }}
-          style={{ position: "fixed", bottom: 16, right: 16 }}
-        >
-          <CloudUploadIcon />
-        </Fab>
-      </Tooltip>
-
-      {/* FAB: create new rule */}
-      <Tooltip title="Create new YARA rule" placement="left">
-        <Fab
-          color="secondary"
-          aria-label="create"
-          onClick={handleNewRuleClick}
-          style={{ position: "fixed", bottom: 16, right: 80 }}
-        >
-          <CreateIcon />
-        </Fab>
-      </Tooltip>
-
       <YaraRuleEditDialog
         open={openViewDialog}
         onClose={() => setOpenViewDialog(false)}
@@ -544,7 +474,7 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         yara_ruleset={yararuleset}
       />
 
-      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 1, py: 1, backgroundColor: 'background.default' }}>
         <TextField
           size="small"
           placeholder="Search rules by name or description"
@@ -557,33 +487,45 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         />
       </Box>
 
+      {(selectionModel as any).ids && (selectionModel as any).ids.size > 0 && (
+        <Fab color="secondary" aria-label="delete" onClick={handleOpenDeleteMultipleDialog}
+          style={{ position: "fixed", bottom: 80, right: 16 }}>
+          <DeleteIcon />
+        </Fab>
+      )}
+      <Tooltip title="Create new YARA rule" placement="left">
+        <Fab color="secondary" aria-label="create" onClick={handleNewRuleClick}
+          style={{ position: "fixed", bottom: 16, right: 80 }}>
+          <CreateIcon />
+        </Fab>
+      </Tooltip>
+      <Tooltip title="Upload YARA rules from file or GitHub" placement="left">
+        <Fab color="primary" aria-label="upload" onClick={() => setOpenCreationDialog(true)}
+          style={{ position: "fixed", bottom: 16, right: 16 }}>
+          <CloudUploadIcon />
+        </Fab>
+      </Tooltip>
+
       <DataGrid
         getRowHeight={() => "auto"}
         disableRowSelectionOnClick
-        rows={yararuleData.filter(r => (
-          r.name.toLowerCase().includes(ruleFilter.toLowerCase()) ||
-          (r.description || "").toLowerCase().includes(ruleFilter.toLowerCase())
-        ))}
+        rows={yararuleData}
         columns={columns}
-        loading={!isConnected}
+        loading={isLoading}
         checkboxSelection
         disableRowSelectionExcludeModel
         rowSelectionModel={selectionModel as any}
         onRowSelectionModelChange={(newSelection) => {
           setSelectionModel(newSelection as any);
         }}
+        paginationMode="server"
+        rowCount={rowCount}
+        paginationModel={paginationModel}
+        onPaginationModelChange={setPaginationModel}
+        pageSizeOptions={[25, 50, 100]}
+        sx={{ height: "calc(100vh - 200px)" }}
       />
 
-      {(selectionModel as any).ids && (selectionModel as any).ids.size > 0 && (
-        <Fab
-          color="secondary"
-          aria-label="delete"
-          style={{ position: "fixed", bottom: 80, right: 16 }}
-          onClick={handleOpenDeleteMultipleDialog}
-        >
-          <DeleteIcon />
-        </Fab>
-      )}
 
       <Dialog
         open={openDeleteDialog}

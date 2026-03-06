@@ -60,7 +60,7 @@ def send_yara_rule_deleted(sender, instance, **kwargs):
                 ruleset = YaraRuleSet.objects.get(id=ruleset_id)
                 ruleset.status = 0
                 ruleset.save(update_fields=['status'])
-                start_ruleset_validation.apply_async(args=[ruleset.id])
+                start_ruleset_validation.apply_async(args=[ruleset.id], kwargs={"skip_rule_validation": True})
             except Exception as e:
                 logging.getLogger(__name__).warning(f"Failed to trigger ruleset validation after rule delete: {e}")
     except Exception:

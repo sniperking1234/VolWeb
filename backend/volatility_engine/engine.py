@@ -582,9 +582,11 @@ class VolatilityEngine:
             self.obj.save()
             return False
 
-    def start_ruleset_validation(self):
+    def start_ruleset_validation(self, skip_rule_validation=False):
         """
         Compile all active YARA rules in the ruleset.
+        skip_rule_validation: if True, skip per-rule validation (e.g. after deletion,
+                              remaining rules are already compiled — no need to revalidate).
         Revised status codes:
             100 -> Success
             -1  -> No active rules
@@ -611,19 +613,16 @@ class VolatilityEngine:
                 self.obj.save()
                 return self.obj.status
 
-            # Validate only rules that need compilation
-            rules_to_validate = [r for r in active_rules if r.status != 100]
-            
-            for rule in rules_to_validate:
-                try:
-                    # Create new engine instance per rule
-                    rule_engine = VolatilityEngine(rule)
-                    rule_engine.start_yararule_validation()
-                    
-                    # Refresh rule instance to get updated status
-                    rule.refresh_from_db()
-                except Exception as e:
-                    logger.error(f"Failed to validate rule '{rule.name}': {e}")
+            if not skip_rule_validation:
+                # Validate only rules that need compilation
+                rules_to_validate = [r for r in active_rules if r.status != 100]
+                for rule in rules_to_validate:
+                    try:
+                        rule_engine = VolatilityEngine(rule)
+                        rule_engine.start_yararule_validation()
+                        rule.refresh_from_db()
+                    except Exception as e:
+                        logger.error(f"Failed to validate rule '{rule.name}': {e}")
 
             # Collect only successfully validated rules
             valid_rules = [r for r in active_rules if r.status == 100]

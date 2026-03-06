@@ -2,43 +2,47 @@ from rest_framework import viewsets, status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.filters import SearchFilter, OrderingFilter
 from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.decorators import action
 from .models import YaraRule
-from .serializers import YaraRuleSerializer
+from .serializers import YaraRuleSerializer, YaraRuleListSerializer
 import yara
 import logging
-from rest_framework.decorators import action
 
 from yararules.utils import batch_upload_context, trigger_delayed_ruleset_validation
 
 logger = logging.getLogger(__name__)
 
 
+class YaraRulePagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+
 class YaraRuleViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated,)
-    queryset = YaraRule.objects.all()
+    queryset = YaraRule.objects.select_related("linked_yararuleset").order_by("name")
     serializer_class = YaraRuleSerializer
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['linked_yararuleset', 'is_active', 'status', 'source']
-    
-    def get_queryset(self):
-        """
-        Optionally filter rules by linked_yararuleset.
-        This allows filtering rules that belong to a specific ruleset.
-        """
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'status']
+    pagination_class = YaraRulePagination
 
-        queryset = super().get_queryset()
-        
-        # Check if linked_yararuleset parameter is in the request
-        linked_yararuleset = self.request.query_params.get('linked_yararuleset', None)
-        
-        if linked_yararuleset is not None:
-            # Filter for rules with the specified ruleset
-            queryset = queryset.filter(linked_yararuleset=linked_yararuleset)
-            
-        return queryset
+    def get_serializer_class(self):
+        if self.action == "list":
+            return YaraRuleListSerializer
+        return YaraRuleSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == "list":
+            qs = qs.defer("rule_content")
+        return qs
 
     @action(detail=False, methods=["post"])
     def bulk_delete(self, request):
@@ -65,7 +69,7 @@ class YaraRuleViewSet(viewsets.ModelViewSet):
 
             # Trigger a delayed validation for each affected ruleset
             for rs_id in affected_ruleset_ids:
-                trigger_delayed_ruleset_validation(rs_id, delay=3)
+                trigger_delayed_ruleset_validation(rs_id, delay=3, skip_rule_validation=True)
 
             return Response({"deleted": deleted_count}, status=status.HTTP_200_OK)
 
