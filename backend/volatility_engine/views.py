@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import VolatilityPlugin, EnrichedProcess
 from evidences.models import Evidence
+import os
+import json
 from yararules.models import YaraRule
 from yararulesets.models import YaraRuleSet
 from .serializers import (
@@ -38,7 +40,7 @@ class EvidencePluginsView(APIView):
     def get(self, request, evidence_id):
         try:
             evidence = Evidence.objects.get(id=evidence_id)
-            plugins = VolatilityPlugin.objects.filter(evidence=evidence)
+            plugins = VolatilityPlugin.objects.filter(evidence=evidence, display="True")
             serializer = VolatilityPluginNameSerializer(plugins, many=True)
 
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -362,12 +364,15 @@ class YaraScanTask(APIView):
             # Verify evidence exists
             evidence = Evidence.objects.get(id=evidence_id)
             
-            # Start the YARA scan task
-            start_yarascan.apply_async(
+            # Start the YARA scan task on the dedicated yarascan queue
+            task = start_yarascan.apply_async(
                 args=[evidence.id],
-                kwargs={"rulesets": rulesets, "rules": rules}
+                kwargs={"rulesets": rulesets, "rules": rules},
+                queue="yarascan",
             )
-            
+            evidence.celery_task_id = task.id
+            evidence.save(update_fields=["celery_task_id"])
+
             return Response(
                 {"message": "YARA scan task started successfully"},
                 status=status.HTTP_200_OK
@@ -384,28 +389,77 @@ class YaraScanTask(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+class StopYaraScanTask(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        try:
+            evidence_id = request.data.get("id")
+            evidence = Evidence.objects.get(id=evidence_id)
+
+            if evidence.celery_task_id:
+                from backend.celery import app
+                from channels.layers import get_channel_layer
+                from asgiref.sync import async_to_sync
+
+                app.control.revoke(evidence.celery_task_id, terminate=True, signal="SIGTERM")
+                evidence.celery_task_id = ""
+                evidence.save(update_fields=["celery_task_id"])
+
+                # Notify the frontend that the scan was stopped
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"volatility_tasks_{evidence_id}",
+                    {
+                        "type": "send_notification",
+                        "message": {
+                            "name": "yarascan",
+                            "status": "stopped",
+                            "result": "false",
+                        },
+                    },
+                )
+
+            return Response({"message": "YARA scan stopped"}, status=status.HTTP_200_OK)
+
+        except Evidence.DoesNotExist:
+            return Response({"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"error": f"Failed to stop scan: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class YaraScanHistoryView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id):
         """
-        Get the most recent YARA scan for an evidence.
-
-        Returns only the latest YARA scan result for the specified evidence.
+        Get metadata for the most recent YARA scan (name, description, count).
+        Does NOT return artefacts — use /yarascan/results/ for paginated results.
         """
         try:
-            # Get the latest YARA scan plugin for this evidence
-            scans = VolatilityPlugin.objects.filter(
+            scan = VolatilityPlugin.objects.filter(
                 evidence_id=evidence_id,
                 name="volatility3.plugins.yarascan.latest"
-            ).order_by('-id')[:1]
-            
-            serializer = VolatilityPluginDetailSerializer(scans, many=True)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-            
+            ).order_by('-id').first()
+
+            if not scan:
+                return Response([], status=status.HTTP_200_OK)
+
+            artefacts = scan.artefacts or {}
+            if isinstance(artefacts, dict) and artefacts.get("streaming"):
+                count = artefacts.get("count", 0)
+            else:
+                count = len(artefacts) if isinstance(artefacts, list) else 0
+
+            return Response([{
+                "name": scan.name,
+                "description": scan.description,
+                "count": count,
+            }], status=status.HTTP_200_OK)
+
         except Exception as e:
             return Response(
-                {"error": f"Failed to fetch scan history: {str(e)}"}, 
+                {"error": f"Failed to fetch scan history: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
@@ -414,20 +468,31 @@ class YaraScanHistoryView(APIView):
         Delete all YARA scans for an evidence
         """
         try:
-            # Delete the YARA scan plugin for this evidence
-            deleted_count = VolatilityPlugin.objects.filter(
+            scans = VolatilityPlugin.objects.filter(
                 evidence_id=evidence_id,
                 name="volatility3.plugins.yarascan.latest"
-            ).delete()[0]
-            
+            )
+            # Remove JSONL result files before deleting DB rows
+            for scan in scans:
+                artefacts = scan.artefacts or {}
+                if isinstance(artefacts, dict) and artefacts.get("streaming"):
+                    file_path = artefacts.get("file", "")
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.unlink(file_path)
+                        except Exception:
+                            pass
+
+            deleted_count = scans.delete()[0]
+
             return Response(
-                {"message": f"Successfully deleted YARA scan" if deleted_count > 0 else "No YARA scan found"}, 
+                {"message": "Successfully deleted YARA scan" if deleted_count > 0 else "No YARA scan found"},
                 status=status.HTTP_200_OK
             )
-            
+
         except Exception as e:
             return Response(
-                {"error": f"Failed to delete scan history: {str(e)}"}, 
+                {"error": f"Failed to delete scan history: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -440,17 +505,18 @@ class YaraScanDetailView(APIView):
         Delete a specific YARA scan
         """
         try:
-            # Special handling for latest YARA scan to handle duplicates
-            if plugin_name == "volatility3.plugins.yarascan.latest":
-                deleted_count = VolatilityPlugin.objects.filter(
-                    evidence_id=evidence_id,
-                    name=plugin_name
-                ).delete()[0]
-            else:
-                deleted_count = VolatilityPlugin.objects.filter(
-                    evidence_id=evidence_id,
-                    name=plugin_name
-                ).delete()[0]
+            scans = VolatilityPlugin.objects.filter(evidence_id=evidence_id, name=plugin_name)
+            # Remove JSONL result files before deleting DB rows
+            for scan in scans:
+                artefacts = scan.artefacts or {}
+                if isinstance(artefacts, dict) and artefacts.get("streaming"):
+                    file_path = artefacts.get("file", "")
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            os.unlink(file_path)
+                        except Exception:
+                            pass
+            deleted_count = scans.delete()[0]
 
             if deleted_count == 0:
                 return Response(
@@ -466,6 +532,70 @@ class YaraScanDetailView(APIView):
         except Exception as e:
             return Response(
                 {"error": f"Failed to delete YARA scan: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class YaraScanResultsView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, evidence_id):
+        """
+        Return a paginated page of YARA scan results.
+        Supports both streaming (JSONL file) and legacy (artefacts list) formats.
+        Query params: page (1-based), page_size
+        """
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = min(500, max(1, int(request.query_params.get("page_size", 100))))
+            offset = (page - 1) * page_size
+
+            scan = VolatilityPlugin.objects.filter(
+                evidence_id=evidence_id,
+                name="volatility3.plugins.yarascan.latest"
+            ).order_by('-id').first()
+
+            if not scan:
+                return Response({"error": "No YARA scan found"}, status=status.HTTP_404_NOT_FOUND)
+
+            artefacts = scan.artefacts or {}
+
+            if isinstance(artefacts, dict) and artefacts.get("streaming"):
+                file_path = artefacts.get("file", "")
+                total_count = artefacts.get("count", 0)
+
+                if not file_path or not os.path.exists(file_path):
+                    return Response(
+                        {"error": "Scan results file not found. The scan may have been run on a different host or the file was deleted."},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                results = []
+                with open(file_path, 'r') as f:
+                    for i, line in enumerate(f):
+                        if i < offset:
+                            continue
+                        if len(results) >= page_size:
+                            break
+                        line = line.strip()
+                        if line:
+                            results.append(json.loads(line))
+            else:
+                # Legacy scans: artefacts stored as a JSON list in the DB
+                artefacts_list = artefacts if isinstance(artefacts, list) else []
+                total_count = len(artefacts_list)
+                results = artefacts_list[offset:offset + page_size]
+
+            return Response({
+                "count": total_count,
+                "results": results,
+                "page": page,
+                "page_size": page_size,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to fetch scan results: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

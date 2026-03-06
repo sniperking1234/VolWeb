@@ -835,51 +835,93 @@ class VolatilityEngine:
             
             # Build and run the plugin
             builted_plugin = self.construct_plugin()
-            
+
             if not builted_plugin:
                 logger.error("Failed to construct YaraScan plugin")
-                
+
                 # If it fails with file://, try with direct absolute path
                 logger.info("Retrying with absolute path...")
                 self.context.config["plugins.YaraScan.yara_file"] = os.path.abspath(temp_file_path)
                 builted_plugin = self.construct_plugin()
-                
+
                 if not builted_plugin:
                     # Last attempt: relative path
                     logger.info("Retrying with relative path...")
                     self.context.config["plugins.YaraScan.yara_file"] = temp_file_name
                     builted_plugin = self.construct_plugin()
-                
+
                 if not builted_plugin:
                     logger.error("All attempts to construct YaraScan plugin failed")
                     return None
-                
-            result = self.run_plugin(builted_plugin)
+
+            # Stream each match directly to a JSONL file — no in-memory accumulation.
+            # This prevents OOM crashes when broad rules (domain/url/IP) produce
+            # millions of matches on a large memory image.
+            results_file_path = os.path.join(output_dir, "yarascan_results.jsonl")
+
+            # Delete the old scan entry + its JSONL file NOW, before truncating the file.
+            # If we did this after streaming, a mid-scan SIGTERM would leave the old DB
+            # entry pointing to a truncated/partial file.
+            old_scans = VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                name=f"volatility3.plugins.yarascan.{scan_id}"
+            )
+            for old_scan in old_scans:
+                old_artefacts = old_scan.artefacts or {}
+                if isinstance(old_artefacts, dict) and old_artefacts.get("streaming"):
+                    old_file = old_artefacts.get("file", "")
+                    if old_file and os.path.exists(old_file):
+                        try:
+                            os.unlink(old_file)
+                        except Exception:
+                            pass
+            old_scans.delete()
+
+            type_renderers = DjangoRenderer._type_renderers
+            match_count = [0]
+            grid = builted_plugin.run()
+
+            from volatility3.framework.interfaces.renderers import BaseAbsentValue as _BaseAbsentValue
+            logger.info(f"Streaming YARA results to {results_file_path}")
+
+            with open(results_file_path, 'w', buffering=8192) as _results_file:
+                def _stream_visitor(node, accumulator):
+                    node_dict = {}
+                    for _ci in range(len(grid.columns)):
+                        _col = grid.columns[_ci]
+                        _renderer = type_renderers.get(_col.type, type_renderers["default"])
+                        _data = _renderer(list(node.values)[_ci])
+                        if isinstance(_data, _BaseAbsentValue):
+                            _data = None
+                        node_dict[_col.name] = _data
+                    _results_file.write(json.dumps(node_dict) + "\n")
+                    match_count[0] += 1
+                    return accumulator
+
+                if not grid.populated:
+                    grid.populate(_stream_visitor, ({}, []))
+                else:
+                    grid.visit(node=None, function=_stream_visitor, initial_accumulator=({}, []))
+
+            total_matches = match_count[0]
+            logger.info(f"YARA scan found {total_matches} matches, streamed to {results_file_path}")
+            result = total_matches > 0
             
             # Fix permissions
             fix_permissions(self.evidence_data["output_path"])
             
             # === SAVE RESULTS TO DATABASE ===
-            from volatility_engine.models import VolatilityPlugin
-            
-            # Determine if we have results
-            has_results = result is not None and len(result) > 0
-            artefacts = result if has_results else []
-            
-            # Log the number of results
-            logger.info(f"YARA scan found {len(artefacts)} matches")
-            
+            # Store file reference + count instead of the full artefacts list
+            has_results = total_matches > 0
+            artefacts = {
+                "streaming": True,
+                "file": results_file_path,
+                "count": total_matches,
+            }
+
             # Update description with actual results count
-            final_description = f"YARA scan using {' + '.join(scan_description_parts)} - {len(artefacts)} matches found at {formatted_timestamp}"
-            
-            # Create the database entry with the corrected description
-            # First, delete any existing scans for this evidence to avoid conflicts
-            VolatilityPlugin.objects.filter(
-                evidence=self.obj,
-                name=f"volatility3.plugins.yarascan.{scan_id}"
-            ).delete()
-            
-            # Then create the new scan
+            final_description = f"YARA scan using {' + '.join(scan_description_parts)} - {total_matches} matches found at {formatted_timestamp}"
+
             VolatilityPlugin.objects.create(
                 name=f"volatility3.plugins.yarascan.{scan_id}",
                 evidence=self.obj,
@@ -895,13 +937,8 @@ class VolatilityEngine:
             
             logger.info(f"YARA scan results saved to database as latest scan")
             
-            # Return results
-            if result is None:
-                logger.info(f"YARA scan completed for evidence '{self.obj.name}' - No matches found")
-                return []
-            else:
-                logger.info(f"YARA scan completed for evidence '{self.obj.name}' - Found {len(result)} matches")
-                return result
+            logger.info(f"YARA scan completed for evidence '{self.obj.name}' - Found {total_matches} matches")
+            return result
             
         except Exception as e:
             logger.error(f"Failed to run YARA scan on evidence '{self.obj.name}': {str(e)}")

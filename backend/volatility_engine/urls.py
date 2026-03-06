@@ -16,8 +16,10 @@ from .views import (
     RestartRuleCompilationTask,
     RestartRulesetCompilationTask,
     YaraScanTask,
+    StopYaraScanTask,
     YaraScanHistoryView,
     YaraScanDetailView,
+    YaraScanResultsView,
     AvailablePluginsView,
     SelectiveExtractionTask,
 )
@@ -53,8 +55,10 @@ urlpatterns = [
     path("yararules/tasks/restart/", RestartRuleCompilationTask.as_view()),
     path("yararulesets/tasks/restart/", RestartRulesetCompilationTask.as_view()),
     path("evidence/<int:evidence_id>/yarascan/history/", YaraScanHistoryView.as_view(), name="yarascan-history"),
+    path("evidence/<int:evidence_id>/yarascan/results/", YaraScanResultsView.as_view(), name="yarascan-results"),
     path("evidence/<int:evidence_id>/yarascan/<str:plugin_name>/", YaraScanDetailView.as_view(), name="yarascan-detail"),
     path("evidence/tasks/yarascan/", YaraScanTask.as_view()),
+    path("evidence/tasks/yarascan/stop/", StopYaraScanTask.as_view(), name="yarascan-stop"),
     path("evidence/<int:evidence_id>/available-plugins/", AvailablePluginsView.as_view(), name="available-plugins"),
     path("evidence/tasks/selective-extraction/", SelectiveExtractionTask.as_view(), name="selective-extraction"),
 ]

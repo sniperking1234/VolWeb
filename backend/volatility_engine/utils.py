@@ -245,9 +245,10 @@ class DjangoRenderer(CLIRenderer):
     name = "JSON"
     structured_output = True
 
-    def __init__(self, evidence_id: int, plugin):
+    def __init__(self, evidence_id: int, plugin, max_results: int = None):
         self.evidence = Evidence.objects.get(id=evidence_id)
         self.plugin = plugin
+        self.max_results = max_results
 
     def get_render_options(self) -> List[interfaces.renderers.RenderOption]:
         pass
@@ -275,6 +276,7 @@ class DjangoRenderer(CLIRenderer):
             Dict[str, List[interfaces.renderers.TreeNode]],
             List[interfaces.renderers.TreeNode],
         ] = ({}, [])
+        _truncated = [False]
 
         def visitor(
             node: interfaces.renderers.TreeNode,
@@ -282,6 +284,14 @@ class DjangoRenderer(CLIRenderer):
         ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
             # Nodes always have a path value, giving them a path_depth of at least 1, we use max just in case
             acc_map, final_tree = accumulator
+            if self.max_results is not None and len(final_tree) >= self.max_results:
+                if not _truncated[0]:
+                    _truncated[0] = True
+                    logger.warning(
+                        f"Result set truncated at {self.max_results} rows for plugin "
+                        f"'{self.plugin.get('name', '?')}'. Remaining matches discarded."
+                    )
+                return accumulator
             node_dict: Dict[str, Any] = {"__children": []}
             for column_index in range(len(grid.columns)):
                 column = grid.columns[column_index]

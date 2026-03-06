@@ -514,6 +514,7 @@ function YaraRuleList({ yararuleset }: YaraRuleListProps) {
         loading={isLoading}
         checkboxSelection
         disableRowSelectionExcludeModel
+        keepNonExistentRowsSelected
         rowSelectionModel={selectionModel as any}
         onRowSelectionModelChange={(newSelection) => {
           setSelectionModel(newSelection as any);

@@ -51,7 +51,7 @@ services:
   volweb-workers:
     build:
       context: ./backend
-      dockerfile: Dockerfile 
+      dockerfile: Dockerfile
     container_name: volweb-workers
     environment:
       - DATABASE=${DATABASE}
@@ -64,7 +64,7 @@ services:
       - DJANGO_SECRET=${DJANGO_SECRET}
       - BROKER_HOST=${BROKER_HOST}
       - BROKER_PORT=${BROKER_PORT}
-    command: celery -A backend worker --loglevel=INFO
+    command: celery -A backend worker --loglevel=INFO -Q celery
     depends_on:
       - volweb-redis
       - volweb-postgresdb
@@ -74,6 +74,34 @@ services:
     deploy:
       mode: replicated
       replicas: 1
+
+  volweb-workers-yarascan:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: volweb-workers-yarascan
+    environment:
+      - DATABASE=${DATABASE}
+      - DATABASE_HOST=${DATABASE_HOST}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS}
+      - DATABASE_PORT=${DATABASE_PORT}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - DJANGO_SECRET=${DJANGO_SECRET}
+      - BROKER_HOST=${BROKER_HOST}
+      - BROKER_PORT=${BROKER_PORT}
+    command: celery -A backend worker --loglevel=INFO -Q yarascan --concurrency 1
+    depends_on:
+      - volweb-redis
+      - volweb-postgresdb
+    restart: always
+    volumes:
+      - media:/home/app/web/media
+    deploy:
+      resources:
+        limits:
+          cpus: "${YARASCAN_CPU_LIMIT:-1.0}"
 
   volweb-frontend:
     build:
