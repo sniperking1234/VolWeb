@@ -18,6 +18,7 @@ from django_celery_results.models import TaskResult
 from django.http import HttpResponse
 from rest_framework import status
 from core.stix import export_bundle, create_indicator
+from core.permissions import get_accessible_cases, check_case_access, check_evidence_access
 
 
 class LogoutView(APIView):
@@ -81,6 +82,14 @@ class IndicatorEvidenceApiView(APIView):
         """
         Get all the indicators for an evidence
         """
+        try:
+            evidence = Evidence.objects.get(id=evidence_id)
+        except Evidence.DoesNotExist:
+            return Response({"message": "Evidence not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            check_evidence_access(request.user, evidence)
+        except Exception:
+            return Response({"message": "You do not have access to this evidence."}, status=status.HTTP_403_FORBIDDEN)
         indicators = Indicator.objects.filter(evidence__id=evidence_id)
         serializer = IndicatorSerializer(indicators, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -93,6 +102,14 @@ class IndicatorCaseApiView(APIView):
         """
         Get all the indicators for a case
         """
+        try:
+            case = Case.objects.get(id=case_id)
+        except Case.DoesNotExist:
+            return Response({"message": "Case not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            check_case_access(request.user, case)
+        except Exception:
+            return Response({"message": "You do not have access to this case."}, status=status.HTTP_403_FORBIDDEN)
         indicators = Indicator.objects.filter(evidence__linked_case=case_id)
         serializer = IndicatorSerializer(indicators, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -105,6 +122,14 @@ class IndicatorExportApiView(APIView):
         """
         Get all the indicators for a case and return as a file blob
         """
+        try:
+            case = Case.objects.get(id=case_id)
+        except Case.DoesNotExist:
+            return Response({"message": "Case not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            check_case_access(request.user, case)
+        except Exception:
+            return Response({"message": "You do not have access to this case."}, status=status.HTTP_403_FORBIDDEN)
         indicators = Indicator.objects.filter(evidence__linked_case=case_id)
         bundle = export_bundle(indicators)
         response = HttpResponse(bundle, content_type="application/octet-stream")
@@ -133,15 +158,18 @@ class StatisticsApiView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
-        total_cases = Case.objects.count()
-        total_evidences = Evidence.objects.count()
-        total_evidences_progress = Evidence.objects.exclude(status=100).count()
-        total_evidences_windows = Evidence.objects.filter(os="windows").count()
-        total_evidences_linux = Evidence.objects.filter(os="linux").count()
+        accessible_cases = get_accessible_cases(request.user)
+        accessible_evidences = Evidence.objects.filter(linked_case__in=accessible_cases)
+
+        total_cases = accessible_cases.count()
+        total_evidences = accessible_evidences.count()
+        total_evidences_progress = accessible_evidences.exclude(status=100).count()
+        total_evidences_windows = accessible_evidences.filter(os="windows").count()
+        total_evidences_linux = accessible_evidences.filter(os="linux").count()
         total_symbols = Symbol.objects.count()
         total_yararules = YaraRule.objects.count()
         total_users = User.objects.count()
-        last_5_cases = Case.objects.all()[:5]
+        last_5_cases = accessible_cases[:5]
         last_5_isf = Symbol.objects.all()[:5]
 
         total_tasks = TaskResult.objects.filter(task_name="Windows.Engine")

@@ -14,6 +14,7 @@ from .serializers import (
     TasksSerializer,
 )
 from rest_framework.permissions import IsAuthenticated
+from core.permissions import check_evidence_access
 from .tasks import (
     dump_file,
     dump_process,
@@ -32,40 +33,44 @@ import json
 from django.db.models import Count, Q
 
 
-
+def _get_evidence_or_403(evidence_id, user):
+    """
+    Fetch Evidence by id and verify the user has access to it.
+    Returns (evidence, None) on success or (None, Response) on failure.
+    """
+    try:
+        evidence = Evidence.objects.get(id=evidence_id)
+    except Evidence.DoesNotExist:
+        return None, Response({"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        check_evidence_access(user, evidence)
+    except Exception:
+        return None, Response({"error": "You do not have access to this evidence."}, status=status.HTTP_403_FORBIDDEN)
+    return evidence, None
 
 class EvidencePluginsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id):
-        try:
-            evidence = Evidence.objects.get(id=evidence_id)
-            plugins = VolatilityPlugin.objects.filter(evidence=evidence, display="True")
-            serializer = VolatilityPluginNameSerializer(plugins, many=True)
-
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        plugins = VolatilityPlugin.objects.filter(evidence=evidence, display="True")
+        serializer = VolatilityPluginNameSerializer(plugins, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class EnrichedProcessView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id, pid):
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence = Evidence.objects.get(id=evidence_id)
             enriched = EnrichedProcess.objects.get(evidence=evidence, pid=pid)
             serializer = EnrichedProcessSerializer(enriched, many=False)
             return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
         except EnrichedProcess.DoesNotExist:
             return Response(
                 {"error": "Enriched process not found"},
@@ -77,17 +82,13 @@ class TimelinerArtefactsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id, plugin_name):
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence = Evidence.objects.get(id=evidence_id)
             plugin = VolatilityPlugin.objects.get(evidence=evidence, name=plugin_name)
             serializer = VolatilityPluginDetailSerializer(plugin)
-
             return Response(serializer.data, status=status.HTTP_200_OK)
-
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
         except VolatilityPlugin.DoesNotExist:
             return Response(
                 {"error": "Plugin not found"}, status=status.HTTP_404_NOT_FOUND
@@ -98,9 +99,10 @@ class PluginArtefactsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id, plugin_name):
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence = Evidence.objects.get(id=evidence_id)
-            
             # Special handling for YARA scan results to avoid duplicates
             if plugin_name == "volatility3.plugins.yarascan.latest":
                 # Get the most recent one if there are duplicates
@@ -143,10 +145,6 @@ class PluginArtefactsView(APIView):
 
             return Response(serializer.data, status=status.HTTP_200_OK)
 
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
         except VolatilityPlugin.DoesNotExist:
             return Response(
                 {"error": "Plugin not found"}, status=status.HTTP_404_NOT_FOUND
@@ -163,41 +161,37 @@ class PauseExtractionTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("id")
-            evidence = Evidence.objects.get(id=evidence_id)
-            evidence.extraction_control = "paused"
-            evidence.save(update_fields=["extraction_control"])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("id")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        evidence.extraction_control = "paused"
+        evidence.save(update_fields=["extraction_control"])
+        return Response(status=status.HTTP_200_OK)
 
 
 class ResumeExtractionTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("id")
-            evidence = Evidence.objects.get(id=evidence_id)
-            evidence.extraction_control = "running"
-            evidence.save(update_fields=["extraction_control"])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("id")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        evidence.extraction_control = "running"
+        evidence.save(update_fields=["extraction_control"])
+        return Response(status=status.HTTP_200_OK)
 
 
 class StopExtractionTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
+        evidence_id = request.data.get("id")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence_id = request.data.get("id")
-            evidence = Evidence.objects.get(id=evidence_id)
 
             # Revoke the Celery task to kill it immediately
             if evidence.celery_task_id:
@@ -209,89 +203,72 @@ class StopExtractionTask(APIView):
             evidence.status = 100
             evidence.save(update_fields=["extraction_control", "celery_task_id", "status"])
             return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TimelinerTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("id")
-            evidence = Evidence.objects.get(id=evidence_id)
-            start_timeliner.apply_async(args=[evidence.id])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("id")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        start_timeliner.apply_async(args=[evidence.id])
+        return Response(status=status.HTTP_200_OK)
 
 
 class HandlesTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("evidenceId")
-            pid = request.data.get("pid")
-            evidence = Evidence.objects.get(id=evidence_id)
-            dump_windows_handles.apply_async(args=[evidence.id, pid])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("evidenceId")
+        pid = request.data.get("pid")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        dump_windows_handles.apply_async(args=[evidence.id, pid])
+        return Response(status=status.HTTP_200_OK)
 
 
 class ProcessDumpPslistTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("evidenceId")
-            pid = request.data.get("pid")
-            evidence = Evidence.objects.get(id=evidence_id)
-            dump_process.apply_async(args=[evidence.id, pid])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("evidenceId")
+        pid = request.data.get("pid")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        dump_process.apply_async(args=[evidence.id, pid])
+        return Response(status=status.HTTP_200_OK)
 
 
 class ProcessDumpMapsTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("evidenceId")
-            pid = request.data.get("pid")
-            evidence = Evidence.objects.get(id=evidence_id)
-            dump_maps.apply_async(args=[evidence.id, pid])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("evidenceId")
+        pid = request.data.get("pid")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        dump_maps.apply_async(args=[evidence.id, pid])
+        return Response(status=status.HTTP_200_OK)
 
 
 class FileDumpTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
-        try:
-            evidence_id = request.data.get("evidenceId")
-            offset = request.data.get("offset")
-            evidence = Evidence.objects.get(id=evidence_id)
-            dump_file.apply_async(args=[evidence.id, offset])
-            return Response(status=status.HTTP_200_OK)
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        evidence_id = request.data.get("evidenceId")
+        file_offset = request.data.get("offset")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+        dump_file.apply_async(args=[evidence.id, file_offset])
+        return Response(status=status.HTTP_200_OK)
 
 
 class TasksApiView(APIView):
@@ -301,6 +278,9 @@ class TasksApiView(APIView):
         """
         Return the requested tasks if existing.
         """
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         tasks = TaskResult.objects.filter(Q(status="STARTED") | Q(status="PENDING"))
         try:
             if tasks:
@@ -350,21 +330,15 @@ class YaraScanTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
+        evidence_id = request.data.get("id")
+        if not evidence_id:
+            return Response({"error": "Evidence ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence_id = request.data.get("id")
             rulesets = request.data.get("rulesets", [])
             rules = request.data.get("rules", [])
-            
-            if not evidence_id:
-                return Response(
-                    {"error": "Evidence ID is required"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Verify evidence exists
-            evidence = Evidence.objects.get(id=evidence_id)
-            
-            # Start the YARA scan task on the dedicated yarascan queue
             task = start_yarascan.apply_async(
                 args=[evidence.id],
                 kwargs={"rulesets": rulesets, "rules": rules},
@@ -372,31 +346,19 @@ class YaraScanTask(APIView):
             )
             evidence.celery_task_id = task.id
             evidence.save(update_fields=["celery_task_id"])
-
-            return Response(
-                {"message": "YARA scan task started successfully"},
-                status=status.HTTP_200_OK
-            )
-            
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"message": "YARA scan task started successfully"}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response(
-                {"error": f"Failed to start YARA scan: {str(e)}"}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": f"Failed to start YARA scan: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class StopYaraScanTask(APIView):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request):
+        evidence_id = request.data.get("id")
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence_id = request.data.get("id")
-            evidence = Evidence.objects.get(id=evidence_id)
-
             if evidence.celery_task_id:
                 from backend.celery import app
                 from channels.layers import get_channel_layer
@@ -406,7 +368,6 @@ class StopYaraScanTask(APIView):
                 evidence.celery_task_id = ""
                 evidence.save(update_fields=["celery_task_id"])
 
-                # Notify the frontend that the scan was stopped
                 channel_layer = get_channel_layer()
                 async_to_sync(channel_layer.group_send)(
                     f"volatility_tasks_{evidence_id}",
@@ -421,9 +382,6 @@ class StopYaraScanTask(APIView):
                 )
 
             return Response({"message": "YARA scan stopped"}, status=status.HTTP_200_OK)
-
-        except Evidence.DoesNotExist:
-            return Response({"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": f"Failed to stop scan: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -436,6 +394,9 @@ class YaraScanHistoryView(APIView):
         Get metadata for the most recent YARA scan (name, description, count).
         Does NOT return artefacts — use /yarascan/results/ for paginated results.
         """
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
             scan = VolatilityPlugin.objects.filter(
                 evidence_id=evidence_id,
@@ -467,6 +428,9 @@ class YaraScanHistoryView(APIView):
         """
         Delete all YARA scans for an evidence
         """
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
             scans = VolatilityPlugin.objects.filter(
                 evidence_id=evidence_id,
@@ -504,6 +468,9 @@ class YaraScanDetailView(APIView):
         """
         Delete a specific YARA scan
         """
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
             scans = VolatilityPlugin.objects.filter(evidence_id=evidence_id, name=plugin_name)
             # Remove JSONL result files before deleting DB rows
@@ -545,6 +512,9 @@ class YaraScanResultsView(APIView):
         Supports both streaming (JSONL file) and legacy (artefacts list) formats.
         Query params: page (1-based), page_size
         """
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
             page = max(1, int(request.query_params.get("page", 1)))
             page_size = min(500, max(1, int(request.query_params.get("page_size", 100))))
@@ -607,8 +577,10 @@ class AvailablePluginsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, evidence_id):
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
         try:
-            evidence = Evidence.objects.get(id=evidence_id)
             os_type = evidence.os  # "windows" or "linux"
 
             # Load from both JSON files
@@ -663,11 +635,8 @@ class AvailablePluginsView(APIView):
                 "categories": categories,
                 "total_plugins": total,
             }, status=status.HTTP_200_OK)
-
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SelectiveExtractionTask(APIView):
@@ -689,27 +658,23 @@ class SelectiveExtractionTask(APIView):
     }
 
     def post(self, request):
+        evidence_id = request.data.get("id")
+        if not evidence_id:
+            return Response({"error": "Evidence ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        selected_plugins = request.data.get("plugins", [])
+        if not selected_plugins:
+            return Response({"error": "At least one plugin must be selected"}, status=status.HTTP_400_BAD_REQUEST)
+
+        evidence, err = _get_evidence_or_403(evidence_id, request.user)
+        if err:
+            return err
+
         try:
-            evidence_id = request.data.get("id")
-            selected_plugins = request.data.get("plugins", [])
             run_timeliner = request.data.get("run_timeliner", False)
             pid_filter = request.data.get("pid", None)
             skip_completed = request.data.get("skip_completed", False)
             plugin_timeout = request.data.get("plugin_timeout", None)
-
-            if not evidence_id:
-                return Response(
-                    {"error": "Evidence ID is required"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            if not selected_plugins:
-                return Response(
-                    {"error": "At least one plugin must be selected"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            evidence = Evidence.objects.get(id=evidence_id)
 
             # Merge required plugins into selection
             required = self.REQUIRED_PLUGINS.get(evidence.os, [])
@@ -731,13 +696,6 @@ class SelectiveExtractionTask(APIView):
             if run_timeliner:
                 start_timeliner.apply_async(args=[evidence.id])
 
-            return Response(
-                {"message": "Selective extraction started"},
-                status=status.HTTP_200_OK
-            )
-
-        except Evidence.DoesNotExist:
-            return Response(
-                {"error": "Evidence not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"message": "Selective extraction started"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

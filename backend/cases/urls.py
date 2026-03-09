@@ -8,7 +8,7 @@ from cases.views import (
 )
 
 router = DefaultRouter()
-router.register(r"cases", CaseViewSet)
+router.register(r"cases", CaseViewSet, basename="case")
 
 urlpatterns = [
     path(

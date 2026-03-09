@@ -12,14 +12,18 @@ from urllib.parse import urlparse
 import boto3
 import botocore
 from minio import Minio
+from core.permissions import get_accessible_cases, check_case_access, check_evidence_access
 
 
 class EvidenceViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated,)
-    queryset = Evidence.objects.all()
     serializer_class = EvidenceSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["linked_case"]
+
+    def get_queryset(self):
+        accessible_cases = get_accessible_cases(self.request.user)
+        return Evidence.objects.filter(linked_case__in=accessible_cases)
 
 
 class EvidenceStatisticsApiView(APIView):
@@ -42,6 +46,14 @@ class EvidenceStatisticsApiView(APIView):
             return Response(
                 {"error": "Evidence with specified ID does not exist"},
                 status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            check_evidence_access(request.user, evidence)
+        except Exception:
+            return Response(
+                {"error": "You do not have access to this evidence."},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
         plugins = VolatilityPlugin.objects.filter(evidence=evidence).exclude(
@@ -101,6 +113,16 @@ class BindEvidenceViewSet(APIView):
         url = data["url"]
         region = data.get("region")
         endpoint = data["endpoint"]
+
+        from cases.models import Case
+        try:
+            case_obj = Case.objects.get(id=linked_case)
+        except Case.DoesNotExist:
+            return Response({"detail": "Case not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            check_case_access(request.user, case_obj)
+        except Exception:
+            return Response({"detail": "You do not have access to this case."}, status=status.HTTP_403_FORBIDDEN)
 
         # Parse the URL to get bucket and key
         def parse_s3_url(url):
