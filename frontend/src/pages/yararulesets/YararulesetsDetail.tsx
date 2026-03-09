@@ -25,10 +25,11 @@ const RulesetDetail: React.FC = () => {
       try {
         const response = await axiosInstance.get(`/api/yararulesets/${id}/`);
         setRulesetDetail(response.data);
-        setLoading(false);
       } catch (error) {
         display_message("error", `An error fetching ruleset details: ${error}`);
         console.error("Error fetching ruleset details", error);
+      } finally {
+        setLoading(false);
       }
     };
 

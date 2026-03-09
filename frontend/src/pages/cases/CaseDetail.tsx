@@ -28,10 +28,11 @@ const CaseDetail: React.FC = () => {
       try {
         const response = await axiosInstance.get(`/api/cases/${id}/`);
         setCaseDetail(response.data);
-        setLoading(false);
       } catch (error) {
         display_message("error", `An error fetching case details: ${error}`);
         console.error("Error fetching case details", error);
+      } finally {
+        setLoading(false);
       }
     };
 
