@@ -57,6 +57,15 @@ Once your case is closed, you can generate you STIX bundle and share your Indica
 
 <img width="1728" alt="image" src="https://github.com/user-attachments/assets/5e4015ff-5eeb-495b-bfe0-7fd3bcdfe43c">
 
+## 🔍 YARA Integration
+
+VolWeb integrates YARA scanning to detect patterns and malware signatures within memory dumps. You can create rules manually, import them from `.yar` files or github repos, or paste existing rules directly into the editor. Rules can be organized into rulesets for better management and grouped scanning.
+
+<img width="1728" alt="image" src="">
+
+The scanning interface allows flexible selection of rulesets, individual rules, or custom combinations. Results appear in a searchable grid showing memory offsets and matched content. VolWeb automatically maintains your most recent scan, allowing quick access to the last result without re-running searches.
+
+<img width="1728" alt="image" src="">
 
 ## 🪡 Interacting with the REST API
 
@@ -82,10 +91,14 @@ VolWeb is open to contributions. Follow the contributing guideline in the docume
 
 # Contact
 
-Contact me at k1nd0ne@mail.com for any questions regarding this tool.
+Contact at k1nd0ne@mail.com or marcoferrara1510@gmail.com for any questions regarding this tool.
 
 # Next Release Goals
 
 Check out the [roadmap](https://github.com/users/k1nd0ne/projects/2)
 
 Check out the [discussions](https://github.com/k1nd0ne/VolWeb/discussions)
+
+# 🏢 Supported by  
+[Software Engineering Laboratory, SERLAB](https://serlab.di.uniba.it/)  
+[Software Engineering & Practices, SER&P](https://serandp.com/it/)

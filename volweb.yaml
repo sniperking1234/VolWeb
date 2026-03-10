@@ -63,7 +63,7 @@ spec:
   ports: [{ protocol: TCP, port: 5432, targetPort: 5432 }]
 ---
 ################################################################################
-# 3.  Redis (unchanged – no env needed)
+# 3.  Redis 
 ################################################################################
 apiVersion: apps/v1
 kind: Deployment

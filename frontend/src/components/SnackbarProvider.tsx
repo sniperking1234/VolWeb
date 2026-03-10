@@ -2,6 +2,7 @@ import React, {
   createContext,
   useState,
   useContext,
+  useEffect,
   ReactNode,
   useMemo,
   useCallback,
@@ -46,6 +47,15 @@ export const SnackbarProvider: React.FC<SnackbarProviderProps> = ({
   );
 
   const contextValue = useMemo(() => ({ display_message }), [display_message]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const message = (e as CustomEvent<{ message: string }>).detail.message;
+      display_message("error", message);
+    };
+    window.addEventListener("api:forbidden", handler);
+    return () => window.removeEventListener("api:forbidden", handler);
+  }, [display_message]);
 
   const handleClose = (
     _event?: React.SyntheticEvent | Event,

@@ -7,7 +7,6 @@ import {
   GridRowSelectionModel,
 } from "@mui/x-data-grid";
 import axiosInstance from "../../utils/axiosInstance";
-import { AxiosError } from "axios";
 import EvidenceCreationDialog from "../Dialogs/EvidenceCreationDialog";
 import LinearProgressWithLabel from "../LinearProgressBar";
 import {
@@ -32,6 +31,10 @@ import {
   Delete as DeleteIcon,
   RestartAlt,
   Fingerprint,
+  Work,
+  PlayArrow,
+  Pause,
+  Stop,
 } from "@mui/icons-material";
 import BindEvidenceDialog from "../Dialogs/BindEvidenceDialog";
 import { Evidence } from "../../types";
@@ -44,8 +47,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
   const navigate = useNavigate();
   const [evidenceData, setEvidenceData] = useState<Evidence[]>([]);
   const [openDeleteDialog, setOpenDeleteDialog] = useState<boolean>(false);
-  const [openRestartDialog, setOpenRestartDialog] = useState<boolean>(false);
-
   const [openCreationDialog, setOpenCreationDialog] = useState<boolean>(false);
   const [openBindingDialog, setOpenBindingDialog] = useState<boolean>(false);
   const [selectedEvidence, setSelectedEvidence] = useState<Evidence | null>(
@@ -146,26 +147,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     };
   }, [caseId, display_message]);
 
-  const handleCreateSuccess = () => {
-    display_message("success", "Evidence created.");
-  };
-
-  const handleCreateFailed = (error: unknown) => {
-    console.log(error);
-    display_message("success", "Evidence created.");
-
-    display_message(
-      "error",
-      `Evidence could not be created: ${
-        error instanceof AxiosError && error.response
-          ? Object.entries(error.response.data)
-              .map(([key, value]) => `${key}: ${value}`)
-              .join(", ")
-          : "Unknown error"
-      }`,
-    );
-  };
-
   const handleBindSuccess = () => {
     display_message("success", "Evidence binded.");
   };
@@ -180,18 +161,12 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     setDeleteMultiple(false);
   };
 
-  const handleRestartClick = (row: Evidence) => {
-    setSelectedEvidence(row);
-    setOpenRestartDialog(true);
-  };
-
   const handleOpenDeleteMultipleDialog = () => {
     setDeleteMultiple(true);
     setOpenDeleteDialog(true);
   };
 
   const selectedIds = [...selectionModel.ids] as number[];
-
   const handleConfirmDelete = async () => {
     if (selectedEvidence && !deleteMultiple) {
       try {
@@ -208,19 +183,49 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     }
   };
 
-  const handleConfirmRestart = async () => {
-    if (selectedEvidence) {
-      const id: number = selectedEvidence.id;
-      try {
-        await axiosInstance.post(`/api/evidence/tasks/restart/`, { id });
-        display_message("success", "Analysis restarted");
-      } catch (error) {
-        display_message("error", `Error restarting the analysis: ${error}`);
-      } finally {
-        setOpenRestartDialog(false);
-      }
+  const handlePlayClick = (evidence: Evidence) => {
+    navigate(`/evidences/${evidence.id}?configure=true`);
+  };
+
+  const handlePause = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/pause/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "paused" } : e,
+        ),
+      );
+    } catch (error) {
+      display_message("error", `Error pausing extraction: ${error}`);
     }
   };
+
+  const handleResume = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/resume/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "running" } : e,
+        ),
+      );
+    } catch (error) {
+      display_message("error", `Error resuming extraction: ${error}`);
+    }
+  };
+
+  const handleStop = async (evidence: Evidence) => {
+    try {
+      await axiosInstance.post("/api/evidence/tasks/stop/", { id: evidence.id });
+      setEvidenceData((prev) =>
+        prev.map((e) =>
+          e.id === evidence.id ? { ...e, extraction_control: "idle", status: 100 } : e,
+        ),
+      );
+    } catch (error) {
+      display_message("error", `Error stopping extraction: ${error}`);
+    }
+  };
+
 
   const handleDeleteSelected = async () => {
     try {
@@ -251,6 +256,24 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       ),
       flex: 1,
     },
+    ...(!caseId ? [{
+      field: "linked_case_name",
+      headerName: "Case",
+      renderCell: (params: GridRenderCellParams) => (
+        <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+          <Work style={{ marginRight: 8 }} color="primary" />
+          <Chip
+            label={params.value || `Case #${params.row.linked_case}`}
+            color="primary"
+            variant="outlined"
+            size="small"
+            onClick={() => navigate(`/cases/${params.row.linked_case}`)}
+            style={{ cursor: 'pointer' }}
+          />
+        </div>
+      ),
+      flex: 0.8,
+    }] : []),
     {
       field: "os",
       headerName: "Operating System",
@@ -277,7 +300,18 @@ function EvidenceList({ caseId }: EvidenceListProps) {
       field: "status",
       headerName: "Status",
       renderCell: (params: GridRenderCellParams) =>
-        params.value === 100 ? (
+        params.row.extraction_control === "paused" ? (
+          <div
+            style={{ display: "flex", alignItems: "center", height: "100%" }}
+          >
+            <Chip
+              label="Paused"
+              size="small"
+              color="warning"
+              variant="outlined"
+            />
+          </div>
+        ) : params.value === 100 ? (
           <div
             style={{ display: "flex", alignItems: "center", height: "100%" }}
           >
@@ -299,6 +333,17 @@ function EvidenceList({ caseId }: EvidenceListProps) {
               variant="outlined"
             />
           </div>
+        ) : params.value === -2 ? (
+          <div
+            style={{ display: "flex", alignItems: "center", height: "100%" }}
+          >
+            <Chip
+              label="Awaiting plugin selection"
+              size="small"
+              color="warning"
+              variant="outlined"
+            />
+          </div>
         ) : (
           <div
             style={{ display: "flex", alignItems: "center", height: "100%" }}
@@ -311,49 +356,108 @@ function EvidenceList({ caseId }: EvidenceListProps) {
     {
       field: "actions",
       headerName: "Actions",
-      renderCell: (params: GridRenderCellParams) => (
-        <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
-          <Tooltip title="Investigate" placement="left">
-            {params.row.status !== 100 ? (
-              <IconButton edge="end" disabled={params.row.status !== 100}>
-                <Biotech />
-              </IconButton>
+      renderCell: (params: GridRenderCellParams) => {
+        const s = params.row.status;
+        const ec = params.row.extraction_control;
+        const isRunning = s >= 0 && s < 100 && ec !== "paused";
+        const isPaused = ec === "paused";
+        const isExtracting = isRunning || isPaused;
+        const isAwaiting = s === -2;
+
+        return (
+          <div style={{ display: "flex", alignItems: "center", height: "100%" }}>
+            <Tooltip title="Investigate" placement="left">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="open"
+                  disabled={isAwaiting}
+                  onClick={() => handleToggle(params.row.id)}
+                >
+                  <Biotech />
+                </IconButton>
+              </span>
+            </Tooltip>
+            {isAwaiting ? (
+              <Tooltip title="Start analysis" placement="top">
+                <IconButton
+                  edge="end"
+                  aria-label="play"
+                  onClick={() => handlePlayClick(params.row)}
+                >
+                  <PlayArrow />
+                </IconButton>
+              </Tooltip>
+            ) : isRunning ? (
+              <>
+                <Tooltip title="Pause" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="pause"
+                    onClick={() => handlePause(params.row)}
+                  >
+                    <Pause />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Stop" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="stop"
+                    onClick={() => handleStop(params.row)}
+                  >
+                    <Stop />
+                  </IconButton>
+                </Tooltip>
+              </>
+            ) : isPaused ? (
+              <>
+                <Tooltip title="Resume" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="resume"
+                    onClick={() => handleResume(params.row)}
+                  >
+                    <PlayArrow />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Stop" placement="top">
+                  <IconButton
+                    edge="end"
+                    aria-label="stop"
+                    onClick={() => handleStop(params.row)}
+                  >
+                    <Stop />
+                  </IconButton>
+                </Tooltip>
+              </>
             ) : (
-              <IconButton
-                edge="end"
-                aria-label="open"
-                onClick={() => handleToggle(params.row.id)}
-              >
-                <Biotech />
-              </IconButton>
+              <Tooltip title="Reconfigure" placement="top">
+                <span>
+                  <IconButton
+                    edge="end"
+                    aria-label="reconfigure"
+                    onClick={() => navigate(`/evidences/${params.row.id}?configure=true`)}
+                  >
+                    <RestartAlt />
+                  </IconButton>
+                </span>
+              </Tooltip>
             )}
-          </Tooltip>
-          <Tooltip title="Restart analysis" placement="right">
-            <IconButton
-              edge="end"
-              aria-label="restart"
-              onClick={() => handleRestartClick(params.row)}
-            >
-              <RestartAlt />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete" placement="right">
-            {params.row.status !== 100 ? (
-              <IconButton edge="end" disabled={params.row.status !== 100}>
-                <DeleteSweep />
-              </IconButton>
-            ) : (
-              <IconButton
-                edge="end"
-                aria-label="delete"
-                onClick={() => handleDeleteClick(params.row)}
-              >
-                <DeleteSweep />
-              </IconButton>
-            )}
-          </Tooltip>
-        </div>
-      ),
+            <Tooltip title="Delete" placement="right">
+              <span>
+                <IconButton
+                  edge="end"
+                  aria-label="delete"
+                  disabled={isExtracting}
+                  onClick={() => handleDeleteClick(params.row)}
+                >
+                  <DeleteSweep />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </div>
+        );
+      },
       flex: 1,
     },
   ];
@@ -375,8 +479,6 @@ function EvidenceList({ caseId }: EvidenceListProps) {
         onClose={() => {
           setOpenCreationDialog(false);
         }}
-        onCreateSuccess={handleCreateSuccess}
-        onCreateFailed={handleCreateFailed}
         caseId={caseId}
       />
       <Fab
@@ -397,18 +499,7 @@ function EvidenceList({ caseId }: EvidenceListProps) {
         onBindSuccess={handleBindSuccess}
         caseId={caseId}
       />
-      <DataGrid
-        rowHeight={40}
-        disableRowSelectionOnClick
-        rows={evidenceData}
-        columns={columns}
-        loading={!isConnected}
-        checkboxSelection
-        rowSelectionModel={selectionModel}
-        onRowSelectionModelChange={(newSelection) =>
-          setSelectionModel(newSelection as GridRowSelectionModel)
-        }
-      />
+
       {selectedIds.length > 0 && (
         <Fab
           color="secondary"
@@ -444,28 +535,20 @@ function EvidenceList({ caseId }: EvidenceListProps) {
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Dialog
-        open={openRestartDialog}
-        onClose={() => setOpenRestartDialog(false)}
-        aria-labelledby="alert-dialog-title"
-        aria-describedby="alert-dialog-description"
-      >
-        <DialogTitle id="alert-dialog-title">Restart the analysis</DialogTitle>
-        <DialogContent>
-          <DialogContentText id="alert-dialog-description">
-            You are about to restart the analysis, confirm ?
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenRestartDialog(false)} color="primary">
-            Cancel
-          </Button>
-          <Button onClick={handleConfirmRestart} color="primary" autoFocus>
-            Restart
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <DataGrid
+        rowHeight={40}
+        disableRowSelectionOnClick
+        rows={evidenceData}
+        columns={columns}
+        loading={!isConnected}
+        pagination
+        disableRowSelectionExcludeModel
+        checkboxSelection
+        rowSelectionModel={selectionModel}
+        onRowSelectionModelChange={(newSelection) => 
+          setSelectionModel(newSelection)
+        }
+      />
     </>
   );
 }

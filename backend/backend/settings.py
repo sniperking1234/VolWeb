@@ -56,6 +56,8 @@ INSTALLED_APPS = [
     "core",
     "cases",
     "evidences",
+    "yararulesets",
+    "yararules",
     "volatility_engine",
     "symbols",
     "channels",
@@ -195,3 +197,13 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TRACK_STARTED = True
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "loggers": {
+        "volatility3.schemas": {
+            "level": "WARNING",
+        },
+    },
+}

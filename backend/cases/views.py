@@ -8,14 +8,17 @@ from django.db.utils import IntegrityError
 from .models import Case, UploadSession
 from evidences.models import Evidence
 from .serializers import CaseSerializer, InitiateUploadSerializer, UploadChunkSerializer, CompleteUploadSerializer
+from core.permissions import get_accessible_cases, check_case_access
 import os
 import shutil
 
 
 class CaseViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated,)
-    queryset = Case.objects.all()
     serializer_class = CaseSerializer
+
+    def get_queryset(self):
+        return get_accessible_cases(self.request.user)
 
     def create(self, request, *args, **kwargs):
         name = request.data.get("name")
@@ -27,7 +30,9 @@ class CaseViewSet(viewsets.ModelViewSet):
             case.save()
             for user_id in linked_users_ids:
                 case.linked_users.add(user_id)
-
+            # Ensure the creator always has access to the case they created
+            if not request.user.is_superuser:
+                case.linked_users.add(request.user)
             case.save()
 
             serializer = CaseSerializer(case)
@@ -83,7 +88,8 @@ class CompleteUploadView(APIView):
                 url=f"file://{os.path.join(settings.MEDIA_ROOT, 'evidences', final_filename)}",
                 linked_case=upload_session.case,
                 os=upload_session.os,
-                etag=upload_session.upload_id
+                etag=upload_session.upload_id,
+                status=-2
             )
 
             # Delete the upload session
@@ -142,6 +148,11 @@ class InitiateUploadView(APIView):
                 case = Case.objects.get(id=case_id)
             except Case.DoesNotExist:
                 return Response({'error': 'Invalid case_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                check_case_access(request.user, case)
+            except Exception:
+                return Response({'error': 'You do not have access to this case.'}, status=status.HTTP_403_FORBIDDEN)
 
             # Create a new upload session
             upload_session = UploadSession.objects.create(

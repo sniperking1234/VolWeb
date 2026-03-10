@@ -6,7 +6,7 @@ from django_celery_results.models import TaskResult
 class VolatilityPluginNameSerializer(serializers.ModelSerializer):
     class Meta:
         model = VolatilityPlugin
-        fields = ["name", "description", "icon", "category", "display", "results"]
+        fields = ["name", "description", "icon", "category", "display", "results", "error_message"]
 
 
 class VolatilityPluginDetailSerializer(serializers.ModelSerializer):

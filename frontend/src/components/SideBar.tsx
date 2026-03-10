@@ -14,6 +14,8 @@ import {
   Memory,
   QuestionMark,
   BlurLinear,
+  DataObject,
+  DataArray,
 } from "@mui/icons-material";
 import ListItem from "@mui/material/ListItem";
 import ListItemButton from "@mui/material/ListItemButton";
@@ -82,6 +84,10 @@ function renderIcon(index: number) {
       return <Memory />;
     case 3:
       return <BlurLinear />;
+    case 4:
+      return <DataArray />;
+    case 5:
+      return <DataObject />;
     default:
       return <QuestionMark />;
   }
@@ -109,7 +115,7 @@ export default function MiniDrawer() {
           {/* Box to contain navigation links, allowed to grow */}
           <Box flexGrow={1} marginTop={1}>
             <List>
-              {["", "Cases", "Evidences", "Symbols"].map((text, index) => (
+              {["", "Cases", "Evidences", "Symbols", "Yara Rulesets", "Yara Rules"].map((text, index) => (
                 <ListItem key={index} disablePadding sx={{ display: "block" }}>
                   <ListItemButton
                     sx={{
@@ -169,7 +175,7 @@ export default function MiniDrawer() {
         </Box>
       </Drawer>
 
-      <Box component="main" sx={{ width: "95%", p: 2 }}>
+      <Box component="main" sx={{ width: "100%", p: 2 }}>
         <DrawerHeader />
         <Outlet />
       </Box>

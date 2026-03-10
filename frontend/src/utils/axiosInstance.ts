@@ -20,6 +20,17 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    if (error.response && error.response.status === 403) {
+      const detail =
+        error.response.data?.detail ||
+        error.response.data?.error ||
+        error.response.data?.message ||
+        "Access denied.";
+      window.dispatchEvent(
+        new CustomEvent("api:forbidden", { detail: { message: detail } }),
+      );
+      return Promise.reject(error);
+    }
     if (
       error.response &&
       error.response.status === 401 &&

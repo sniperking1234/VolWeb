@@ -12,14 +12,18 @@ from urllib.parse import urlparse
 import boto3
 import botocore
 from minio import Minio
+from core.permissions import get_accessible_cases, check_case_access, check_evidence_access
 
 
 class EvidenceViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated,)
-    queryset = Evidence.objects.all()
     serializer_class = EvidenceSerializer
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["linked_case"]
+
+    def get_queryset(self):
+        accessible_cases = get_accessible_cases(self.request.user)
+        return Evidence.objects.filter(linked_case__in=accessible_cases)
 
 
 class EvidenceStatisticsApiView(APIView):
@@ -44,6 +48,14 @@ class EvidenceStatisticsApiView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        try:
+            check_evidence_access(request.user, evidence)
+        except Exception:
+            return Response(
+                {"error": "You do not have access to this evidence."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         plugins = VolatilityPlugin.objects.filter(evidence=evidence).exclude(
             category="Other"
         )
@@ -57,12 +69,14 @@ class EvidenceStatisticsApiView(APIView):
 
         total_ran = plugins.count()
         total_results = plugins.filter(results=True).count()
+        total_failed = plugins.exclude(error_message__isnull=True).exclude(error_message="").count()
 
         return Response(
             {
                 "categories": dict(category_artefacts_counter),
                 "total_ran": total_ran,
                 "total_results": total_results,
+                "total_failed": total_failed,
             },
             status=status.HTTP_200_OK,
         )
@@ -99,6 +113,16 @@ class BindEvidenceViewSet(APIView):
         url = data["url"]
         region = data.get("region")
         endpoint = data["endpoint"]
+
+        from cases.models import Case
+        try:
+            case_obj = Case.objects.get(id=linked_case)
+        except Case.DoesNotExist:
+            return Response({"detail": "Case not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            check_case_access(request.user, case_obj)
+        except Exception:
+            return Response({"detail": "You do not have access to this case."}, status=status.HTTP_403_FORBIDDEN)
 
         # Parse the URL to get bucket and key
         def parse_s3_url(url):
@@ -187,7 +211,7 @@ class BindEvidenceViewSet(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Create the Evidence object
+        # Create the Evidence object with status=-2 (awaiting plugin selection)
         evidence_data = {
             "name": name,
             "etag": etag,
@@ -199,6 +223,7 @@ class BindEvidenceViewSet(APIView):
             "url": url,
             "region": region,
             "endpoint": endpoint,
+            "status": -2,
         }
 
         serializer = EvidenceSerializer(data=evidence_data)

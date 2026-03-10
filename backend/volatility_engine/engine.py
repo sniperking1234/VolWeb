@@ -1,9 +1,12 @@
 from evidences.models import Evidence
+from yararules.models import YaraRule
+from yararulesets.models import YaraRuleSet
 from .models import VolatilityPlugin, EnrichedProcess
 import logging
 import volatility3
 import traceback
 import os
+import json
 import shutil
 from volatility3.cli import MuteProgress
 from volatility3.framework.exceptions import UnsatisfiedException
@@ -28,6 +31,8 @@ from volatility3.framework import contexts, automagic
 from volatility3 import framework
 import volatility3.plugins
 from volatility3.framework.symbols.linux import extensions as linux_ext
+import yara
+import tempfile
 
 volatility3.framework.require_interface_version(2, 0, 0)
 logger = logging.getLogger(__name__)
@@ -38,14 +43,29 @@ class VolatilityEngine:
     It is used by VolWeb when a user just uploaded a memory image for a given Evidence
     """
 
-    def __init__(self, evidence) -> None:
-        """ """
-        self.evidence: Evidence = evidence
-        # Checks if the user bind an evidence or is using the default storage solution
-        self.evidence_data = {
-            "bucket": self.evidence.url,
-            "output_path": f"media/{self.evidence.id}/",
-        }
+    def __init__(self, obj) -> None:
+        self.obj: object = obj
+
+        if isinstance(obj, Evidence):
+            self.evidence_data = {
+                "bucket": obj.url,
+                "output_path": f"media/{obj.id}/",
+            }
+
+        elif isinstance(obj, YaraRule):
+            self.yararule_data = {
+                "bucket": obj.url,
+                "output_path": f"yararules/{obj.id}/",
+            }
+
+        elif isinstance(obj, YaraRuleSet):
+            self.ruleset_data = {
+                "output_path": f"yararulesets/{obj.id}/",
+            }
+
+        else:
+            raise TypeError(f"Unsupported object type: {type(obj)}")
+
         self.base_config_path = "plugins"
         self._modules_loaded = False
         self._load_core_modules()
@@ -58,15 +78,42 @@ class VolatilityEngine:
         """
         with transaction.atomic():
             VolatilityPlugin.objects.filter(
-                evidence=self.evidence
+                evidence=self.obj
             ).delete()
             EnrichedProcess.objects.filter(
-                evidence=self.evidence
+                evidence=self.obj
             ).delete()
-        artefact_dir = Path(f"media/{self.evidence.id}")
+        artefact_dir = Path(f"media/{self.obj.id}")
         if artefact_dir.exists():
             shutil.rmtree(artefact_dir, ignore_errors=True)
         artefact_dir.mkdir(parents=True, exist_ok=True)
+
+    def _purge_selected_plugins(self, plugin_names) -> None:
+        """
+        Remove only the specified plugin records from the database.
+        Keeps successful plugins intact. Also rebuilds EnrichedProcess data.
+        """
+        with transaction.atomic():
+            VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                name__in=plugin_names,
+            ).delete()
+            EnrichedProcess.objects.filter(
+                evidence=self.obj
+            ).delete()
+        os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+
+    def _get_successful_plugin_names(self) -> list:
+        """
+        Returns the list of plugin names that completed successfully (results=True)
+        for this evidence.
+        """
+        return list(
+            VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                results=True,
+            ).values_list("name", flat=True)
+        )
 
 
     def _load_core_modules(self):
@@ -80,21 +127,35 @@ class VolatilityEngine:
 
 
     def build_context(self, plugin):
-
         self.plugin, self.metadata = plugin.popitem()
+        
+        if hasattr(self, 'context') and self.context:
+            previous_config = dict(self.context.config)
+            logger.info(f"Previous context config: {previous_config}")
+        
         self.context = contexts.Context()
         available_automagics = automagic.available(self.context)
-
+        
         self.automagics = automagic.choose_automagic(available_automagics, self.plugin)
-        self.context.config["automagic.LayerStacker.stackers"] = (
-            automagic.stacker.choose_os_stackers(self.plugin)
-        )
-
+        
         self.context.config["automagic.LayerStacker.single_location"] = (
             self.evidence_data["bucket"]
         )
+        
+        self.context.config["automagic.LayerStacker.stackers"] = (
+            automagic.stacker.choose_os_stackers(self.plugin)
+        )
+        
+        self.context.config["VolWeb.Evidence"] = self.obj.id
+        
+        if "yarascan" in str(self.plugin).lower():
+            logger.info(f"Building context for YaraScan plugin")
+            logger.info(f"Plugin class: {self.plugin}")
+            logger.info(f"Evidence bucket: {self.evidence_data['bucket']}")
+            logger.info(f"Available automagics: {[a.__class__.__name__ for a in available_automagics]}")
+        
+        logger.debug(f"Context config: {self.context.config}")
 
-        self.context.config["VolWeb.Evidence"] = self.evidence.id
 
     def construct_plugin(self):
         """
@@ -115,67 +176,11 @@ class VolatilityEngine:
 
     def run_plugin(self, constructed):
         if constructed:
-            result = DjangoRenderer(self.evidence.id, self.metadata).render(
+            result = DjangoRenderer(self.obj.id, self.metadata).render(
                 constructed.run()
             )
             return result
         return None
-
-    def start_windows_analysis(self):
-        plugin_list = [
-            {
-                VolWebMainW: {
-                    "icon": "None",
-                    "description": "VolWeb Main plugin executing many other plugins with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMain",
-                }
-            },
-            {
-                VolWebMiscW: {
-                    "icon": "None",
-                    "description": "VolWeb Misc plugin executing other plugins that are sharing the same requirements with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMisc",
-                }
-            },
-        ]
-        for plugin in plugin_list:
-            logger.debug(f"Running {plugin}...")
-            self.build_context(plugin)
-            builted_plugin = self.construct_plugin()
-            self.run_plugin(builted_plugin)
-        fix_permissions(self.evidence_data["output_path"])
-
-    def start_linux_analysis(self):
-        plugin_list = [
-            {
-                VolWebMainL: {
-                    "icon": "None",
-                    "description": "VolWeb Main plugin executing many other plugins with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMain",
-                }
-            },
-            {
-                VolWebMiscL: {
-                    "icon": "None",
-                    "description": "VolWeb Misc plugin executing other plugins that are sharing the same requirements with automagics optimization",
-                    "category": "Other",
-                    "display": "False",
-                    "name": "VolWebMisc",
-                }
-            },
-        ]
-        for plugin in plugin_list:
-            logger.debug(f"RUNNING PLUGIN: {plugin}")
-            self.build_context(plugin)
-            builted_plugin = self.construct_plugin()
-            self.run_plugin(builted_plugin)
-        fix_permissions(self.evidence_data["output_path"])
 
     def start_timeliner(self):
         timeliner_plugin = {
@@ -196,7 +201,7 @@ class VolatilityEngine:
                 name="volatility3.plugins.timeliner.TimelinerGraph",
                 icon="None",
                 description="None",
-                evidence=self.evidence,
+                evidence=self.obj,
                 artefacts=graph,
                 category="Timeline",
                 display="False",
@@ -204,32 +209,97 @@ class VolatilityEngine:
             )
         return result
 
-    def start_extraction(self):
+    def start_selective_extraction(self, selected_plugins=None, pid_filter=None, skip_completed=False, plugin_timeout=None):
+        """
+        Run only the selected plugins instead of all plugins.
+        selected_plugins: list of plugin name strings
+        pid_filter: optional PID to filter process-based plugins
+        skip_completed: if True, skip plugins that already have results=True
+        plugin_timeout: optional per-plugin timeout in seconds (None = no timeout)
+        """
         try:
-            self._purge_previous_run()
-            logger.info("Starting extraction")
-            self.evidence.status = 0  # Make sure we start at 0%
-            os.makedirs(f"media/{self.evidence.id}", exist_ok=True)
-            if self.evidence.os == "windows":
-                self.start_windows_analysis()
+            if skip_completed:
+                successful = self._get_successful_plugin_names()
+                original_count = len(selected_plugins)
+                selected_plugins = [p for p in selected_plugins if p not in successful]
+                logger.info(f"Smart selective: skipping {original_count - len(selected_plugins)} successful plugins")
+                if not selected_plugins:
+                    logger.info("All selected plugins already completed successfully, nothing to re-run")
+                    return
+                self._purge_selected_plugins(selected_plugins)
+            else:
+                self._purge_previous_run()
+            logger.info(f"Starting selective extraction with {len(selected_plugins)} plugins")
+            self.obj.status = 0
+            os.makedirs(f"media/{self.obj.id}", exist_ok=True)
+
+            # Load plugin registries to separate main vs misc
+            with open("volatility_engine/volweb_plugins.json", "r") as f:
+                all_main = json.load(f).get("plugins", {}).get(self.obj.os, {})
+            with open("volatility_engine/volweb_misc.json", "r") as f:
+                all_misc = json.load(f).get("plugins", {}).get(self.obj.os, {})
+
+            main_selected = [p for p in selected_plugins if p in all_main]
+            misc_selected = [p for p in selected_plugins if p in all_misc]
+
+            if self.obj.os == "windows":
+                if main_selected:
+                    self._run_selective_wrapper(VolWebMainW, main_selected, pid_filter, plugin_timeout)
+                if misc_selected:
+                    self._run_selective_wrapper(VolWebMiscW, misc_selected, pid_filter, plugin_timeout)
                 self.construct_windows_explorer()
             else:
-                self.start_linux_analysis()
+                if main_selected:
+                    self._run_selective_wrapper(VolWebMainL, main_selected, pid_filter, plugin_timeout)
+                if misc_selected:
+                    self._run_selective_wrapper(VolWebMiscL, misc_selected, pid_filter, plugin_timeout)
                 self.construct_linux_explorer()
+
         except UnsatisfiedException as e:
-            self.evidence.status = -1
-            self.evidence.save()
-            logger.error(f"{e.unsatisfied}")
+            self.obj.status = -1
+            self.obj.save(update_fields=["status"])
+            logger.warning(f"Unsatisfied requirements: {str(e)}")
         except Exception as e:
-            self.evidence.status = -1
-            self.evidence.save()
-            logger.error(f"Unknown error, should not happen: {str(e)}")
+            self.obj.status = -1
+            self.obj.save(update_fields=["status"])
+            logger.error(f"Unknown error in selective extraction: {str(e)}")
             logger.error(traceback.format_exc())
 
+    def _run_selective_wrapper(self, wrapper_class, selected_plugins, pid_filter=None, plugin_timeout=None):
+        """
+        Run a wrapper plugin with a filtered plugin list.
+        Passes the selected plugin list through the Volatility3 context config.
+        """
+        plugin_entry = {
+            wrapper_class: {
+                "icon": "None",
+                "description": f"VolWeb selective execution of {len(selected_plugins)} plugins",
+                "category": "Other",
+                "display": "False",
+                "name": "VolWebSelective",
+            }
+        }
+
+        self.build_context(plugin_entry)
+
+        # Pass selected plugins via context config
+        self.context.config["VolWeb.SelectedPlugins"] = json.dumps(selected_plugins)
+
+        # Pass optional PID filter
+        if pid_filter is not None:
+            self.context.config["VolWeb.PidFilter"] = int(pid_filter)
+
+        # Pass optional per-plugin timeout
+        if plugin_timeout is not None:
+            self.context.config["VolWeb.PluginTimeout"] = int(plugin_timeout)
+
+        builted_plugin = self.construct_plugin()
+        self.run_plugin(builted_plugin)
+        fix_permissions(self.evidence_data["output_path"])
 
     def dump_process(self, pid):
         logger.info(f"Trying to dump PID {pid}")
-        if self.evidence.os == "windows":
+        if self.obj.os == "windows":
             pslist_plugin = {
                 volatility3.plugins.windows.pslist.PsList: {
                     "icon": "N/A",
@@ -256,12 +326,12 @@ class VolatilityEngine:
         self.context.config["plugins.PsList.dump"] = True
         builted_plugin = self.construct_plugin()
         result = self.run_plugin(builted_plugin)
-        fix_permissions(f"media/{self.evidence.id}")
+        fix_permissions(f"media/{self.obj.id}")
         return result
 
     def dump_process_maps(self, pid):
         logger.info(f"Trying to dump PID {pid}")
-        if self.evidence.os == "windows":
+        if self.obj.os == "windows":
             procmaps_plugin = {
                 volatility3.plugins.windows.pslist.PsList: {
                     "icon": "N/A",
@@ -288,7 +358,7 @@ class VolatilityEngine:
         self.context.config["plugins.Maps.dump"] = True
         builted_plugin = self.construct_plugin()
         result = self.run_plugin(builted_plugin)
-        fix_permissions(f"media/{self.evidence.id}")
+        fix_permissions(f"media/{self.obj.id}")
         return result
 
     def compute_handles(self, pid):
@@ -326,7 +396,7 @@ class VolatilityEngine:
                 self.context.config["plugins.DumpFiles.physaddr"] = int(offset)
                 result = self.run_plugin(builted_plugin)
 
-            fix_permissions(f"media/{self.evidence.id}")
+            fix_permissions(f"media/{self.obj.id}")
             return result
         except Exception as e:
             logger.error(e)
@@ -354,7 +424,7 @@ class VolatilityEngine:
                 self.context.config["plugins.DumpFiles.physaddr"] = int(offset)
                 result = self.run_plugin(builted_plugin)
 
-            fix_permissions(f"media/{self.evidence.id}")
+            fix_permissions(f"media/{self.obj.id}")
             return result
         except Exception as e:
             logger.error(e)
@@ -364,12 +434,12 @@ class VolatilityEngine:
 
     def construct_windows_explorer(self):
         # Get all VolatilityPlugin objects linked to this evidence
-        plugins = VolatilityPlugin.objects.filter(evidence=self.evidence)
+        plugins = VolatilityPlugin.objects.filter(evidence=self.obj)
 
         # Get the pslist plugin's output, which contains the list of processes
         try:
             pslist_plugin = VolatilityPlugin.objects.get(
-                evidence=self.evidence, name="volatility3.plugins.windows.pslist.PsList"
+                evidence=self.obj, name="volatility3.plugins.windows.pslist.PsList"
             )
         except VolatilityPlugin.DoesNotExist:
             logger.error("pslist plugin not found for this evidence")
@@ -411,7 +481,7 @@ class VolatilityEngine:
 
             # Save the enriched process data into the EnrichedProcess model
             EnrichedProcess.objects.update_or_create(
-                evidence=self.evidence,
+                evidence=self.obj,
                 pid=pid,
                 defaults={"data": enriched_process_data},
             )
@@ -419,12 +489,12 @@ class VolatilityEngine:
 
     def construct_linux_explorer(self):
         # Get all VolatilityPlugin objects linked to this evidence
-        plugins = VolatilityPlugin.objects.filter(evidence=self.evidence)
+        plugins = VolatilityPlugin.objects.filter(evidence=self.obj)
 
         # Get the pslist plugin's output, which contains the list of processes
         try:
             pslist_plugin = VolatilityPlugin.objects.get(
-                evidence=self.evidence, name="volatility3.plugins.linux.pslist.PsList"
+                evidence=self.obj, name="volatility3.plugins.linux.pslist.PsList"
             )
         except VolatilityPlugin.DoesNotExist:
             logger.error("pslist plugin not found for this evidence")
@@ -465,7 +535,422 @@ class VolatilityEngine:
 
             # Save the enriched process data into the EnrichedProcess model
             EnrichedProcess.objects.update_or_create(
-                evidence=self.evidence,
+                evidence=self.obj,
                 pid=pid,
                 defaults={"data": enriched_process_data},
             )
+    
+    def start_yararule_validation(self):
+        try:
+            logger.info(f"Validating YARA rule: {self.obj.name}")
+            
+            # Check for empty rule content
+            if not self.obj.rule_content or not self.obj.rule_content.strip():
+                logger.error(f"YARA rule '{self.obj.name}' has no content")
+                self.obj.status = -1  # Empty content error
+                self.obj.save()
+                return False
+                
+            # Try to compile the rule
+            yara.compile(source=self.obj.rule_content)
+            
+            # Success case
+            self.obj.status = 100
+            self.obj.save()
+            logger.info(f"YARA rule '{self.obj.name}' is valid")
+            return True
+
+        except yara.SyntaxError as e:
+            # Syntax errors in YARA rule
+            logger.error(f"Syntax error in rule '{self.obj.name}': {e}")
+            self.obj.status = -2  # Specific syntax error code
+            self.obj.save()
+            return False
+
+        except yara.Error as e:
+            # Other YARA-specific errors
+            logger.error(f"YARA compilation error in rule '{self.obj.name}': {e}")
+            self.obj.status = -3  # General YARA error code
+            self.obj.save()
+            return False
+
+        except Exception as e:
+            # Generic/unexpected errors
+            logger.error(f"Unexpected error validating rule '{self.obj.name}': {e}")
+            logger.error(traceback.format_exc())
+            self.obj.status = -4  # System/unknown error code
+            self.obj.save()
+            return False
+
+    def start_ruleset_validation(self, skip_rule_validation=False):
+        """
+        Compile all active YARA rules in the ruleset.
+        skip_rule_validation: if True, skip per-rule validation (e.g. after deletion,
+                              remaining rules are already compiled — no need to revalidate).
+        Revised status codes:
+            100 -> Success
+            -1  -> No active rules
+            -2  -> No valid rules
+            -3  -> General error
+        """
+        try:
+            logger.info(f"Starting compilation for ruleset: {self.obj.name}")
+
+            # Fetch active rules only once to avoid stale data
+            with transaction.atomic():
+                active_rules = list(YaraRule.objects.filter(
+                    linked_yararuleset=self.obj,
+                    is_active=True
+                ).select_for_update())
+
+            logger.info(f"Found {len(active_rules)} active rules for ruleset '{self.obj.name}'")
+            
+
+            if not active_rules:
+                logger.info(f"No active rules found in ruleset '{self.obj.name}'")
+                self.obj.compiled_rules = None
+                self.obj.status = -1
+                self.obj.save()
+                return self.obj.status
+
+            if not skip_rule_validation:
+                # Validate only rules that need compilation
+                rules_to_validate = [r for r in active_rules if r.status != 100]
+                for rule in rules_to_validate:
+                    try:
+                        rule_engine = VolatilityEngine(rule)
+                        rule_engine.start_yararule_validation()
+                        rule.refresh_from_db()
+                    except Exception as e:
+                        logger.error(f"Failed to validate rule '{rule.name}': {e}")
+
+            # Collect only successfully validated rules
+            valid_rules = [r for r in active_rules if r.status == 100]
+            valid_rules_count = len(valid_rules)
+            
+            if not valid_rules:
+                logger.info(f"No valid compiled rules found in ruleset '{self.obj.name}'")
+                self.obj.compiled_rules = None
+                self.obj.status = -2
+                self.obj.save()
+                return self.obj.status
+
+            logger.info(f"Compiling {valid_rules_count} valid rules into ruleset...")
+            
+            try:
+                # Create rules dictionary for compilation
+                rules_dict = {}
+                for rule in valid_rules:
+                    rules_dict[f"rule_{rule.id}"] = rule.rule_content
+
+                compiled_rules = yara.compile(sources=rules_dict)
+                
+                # Serialize compiled rules
+                import io
+                binary_data = io.BytesIO()
+                compiled_rules.save(file=binary_data)
+                self.obj.compiled_rules = binary_data.getvalue()
+                
+                # Final success status
+                self.obj.status = 100
+                self.obj.save()
+                
+                logger.info(f"Successfully compiled ruleset '{self.obj.name}'")
+                return self.obj.status
+                
+            except yara.Error as e:
+                logger.error(f"Ruleset compilation failed: {str(e)}")
+                self.obj.status = -3
+                self.obj.save()
+                return self.obj.status
+
+        except Exception as e:
+            logger.error(f"Ruleset validation failed: {str(e)}")
+            self.obj.status = -3
+            self.obj.save()
+            return self.obj.status
+        
+    def run_yara_scan(self, yara_ruleset=None, yara_rules=None, yara_rulesets=None):
+        """
+        Run YARA scan on evidence with selected ruleset(s) or rules.
+        """
+        from yararules.models import YaraRule
+        import traceback
+        import os
+        import time
+        from datetime import datetime
+        
+        try:
+            logger.info(f"Starting YARA scan on evidence '{self.obj.name}'")
+            
+            # === PREPARATION PHASE ===
+            combined_rules = ""
+            
+            # Determine scan description based on what was passed
+            scan_description_parts = []
+            active_rules = YaraRule.objects.none()  # Start with empty QuerySet
+            
+            if yara_rulesets:
+                # Multiple rulesets - NEW functionality
+                logger.info(f"Processing {len(yara_rulesets)} rulesets")
+                ruleset_names = []
+                
+                for ruleset in yara_rulesets:
+                    if not ruleset.compiled_rules:
+                        logger.warning(f"Ruleset '{ruleset.name}' has no compiled rules, skipping")
+                        continue
+                    
+                    ruleset_names.append(ruleset.name)
+                    
+                    # Get rules from this ruleset
+                    ruleset_rules = YaraRule.objects.filter(
+                        linked_yararuleset=ruleset,
+                        is_active=True,
+                        status=100
+                    )
+                    
+                    # Combine with other active rules
+                    active_rules = active_rules.union(ruleset_rules)
+                    
+                    # Add rule contents
+                    for rule in ruleset_rules:
+                        combined_rules += rule.rule_content + "\n\n"
+                
+                # Create description for multiple rulesets
+                if len(ruleset_names) <= 2:
+                    scan_description_parts.append(f"rulesets: {', '.join(ruleset_names)}")
+                else:
+                    scan_description_parts.append(f"rulesets: {', '.join(ruleset_names[:2])}, +{len(ruleset_names) - 2} more")
+                    
+            elif yara_ruleset:
+                # Single ruleset - existing functionality
+                if not yara_ruleset.compiled_rules:
+                    logger.error(f"Ruleset '{yara_ruleset.name}' has no compiled rules")
+                    return None
+
+                active_rules = YaraRule.objects.filter(
+                    linked_yararuleset=yara_ruleset,
+                    is_active=True,
+                    status=100
+                )
+                
+                # Combine rule contents from the ruleset
+                for rule in active_rules:
+                    combined_rules += rule.rule_content + "\n\n"
+                    
+                scan_description_parts.append(f"ruleset: {yara_ruleset.name}")
+
+            elif yara_rules:
+                # Individual rule IDs
+                active_rules = YaraRule.objects.filter(
+                    id__in=yara_rules,
+                    is_active=True,
+                    status=100
+                )
+                
+                # Log the rules found
+                logger.info(f"Found {active_rules.count()} active rules from IDs: {yara_rules}")
+                
+                # Combine rule contents from individual rules
+                for rule in active_rules:
+                    logger.info(f"Adding rule '{rule.name}' to scan")
+                    combined_rules += rule.rule_content + "\n\n"
+                    
+                rule_count = len(yara_rules) if isinstance(yara_rules, list) else 1
+                scan_description_parts.append(f"{rule_count} individual rule{'s' if rule_count > 1 else ''}")
+
+            else:
+                # Using all active rules
+                active_rules = YaraRule.objects.filter(is_active=True, status=100)
+                
+                if not active_rules.exists():
+                    logger.warning("No active YARA rules found in database")
+                    return None
+                
+                # Combine all rule contents
+                for rule in active_rules:
+                    combined_rules += rule.rule_content + "\n\n"
+                    
+                scan_description_parts.append("All Active Rules")
+
+            # Check if we have any rules to scan with
+            if not combined_rules.strip():  
+                logger.warning("No active YARA rules found for scanning")
+                return None
+            
+            logger.info(f"Combined {active_rules.count()} rules for scanning")
+            logger.debug(f"Combined rules content length: {len(combined_rules)} characters")
+                            
+            # === FILE CREATION PHASE ===
+            # Create temporary file with the combined rules
+            
+            # Use the evidence output directory which we know is accessible
+            output_dir = self.evidence_data["output_path"]
+            os.makedirs(output_dir, exist_ok=True)
+            
+            temp_file_name = f"yara_rules_{int(time.time())}.yara"
+            temp_file_path = os.path.join(output_dir, temp_file_name)
+            
+            # Write the file
+            with open(temp_file_path, 'w') as f:
+                f.write(combined_rules)
+                
+            # Verify that the file was created
+            if not os.path.exists(temp_file_path):
+                logger.error(f"Failed to create YARA file at: {temp_file_path}")
+                return None
+                
+            logger.info(f"YARA file created: {temp_file_path} ({os.path.getsize(temp_file_path)} bytes)")
+            
+            # === EXECUTION PHASE ===
+            logger.info("Executing YARA scan...")
+            
+            scan_id = "latest"
+            
+            # Create description with current timestamp
+            formatted_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            scan_description = f"YARA scan using {' + '.join(scan_description_parts)} - processing at {formatted_timestamp}"
+            
+            # Configure YARA scan plugin for Volatility
+            yara_plugin = {
+                volatility3.plugins.yarascan.YaraScan: {
+                    "icon": "🔍",
+                    "description": scan_description,
+                    "category": "Malware",
+                    "display": "False",
+                    "name": f"volatility3.plugins.yarascan.{scan_id}",
+                }
+            }
+            
+            # Build context and configure plugin
+            self.build_context(yara_plugin)
+            
+            # Try different path formats for the file
+            # Option 1: file:// URL with absolute path
+            file_url = f"file://{os.path.abspath(temp_file_path)}"
+            self.context.config["plugins.YaraScan.yara_file"] = file_url
+            
+            logger.info(f"Context config after YARA file: {self.context.config.get('plugins.YaraScan.yara_file')}")
+            logger.info(f"Layer stacker location: {self.context.config.get('automagic.LayerStacker.single_location')}")
+            
+            # Build and run the plugin
+            builted_plugin = self.construct_plugin()
+
+            if not builted_plugin:
+                logger.error("Failed to construct YaraScan plugin")
+
+                # If it fails with file://, try with direct absolute path
+                logger.info("Retrying with absolute path...")
+                self.context.config["plugins.YaraScan.yara_file"] = os.path.abspath(temp_file_path)
+                builted_plugin = self.construct_plugin()
+
+                if not builted_plugin:
+                    # Last attempt: relative path
+                    logger.info("Retrying with relative path...")
+                    self.context.config["plugins.YaraScan.yara_file"] = temp_file_name
+                    builted_plugin = self.construct_plugin()
+
+                if not builted_plugin:
+                    logger.error("All attempts to construct YaraScan plugin failed")
+                    return None
+
+            # Stream each match directly to a JSONL file — no in-memory accumulation.
+            # This prevents OOM crashes when broad rules (domain/url/IP) produce
+            # millions of matches on a large memory image.
+            results_file_path = os.path.join(output_dir, "yarascan_results.jsonl")
+
+            # Delete the old scan entry + its JSONL file NOW, before truncating the file.
+            # If we did this after streaming, a mid-scan SIGTERM would leave the old DB
+            # entry pointing to a truncated/partial file.
+            old_scans = VolatilityPlugin.objects.filter(
+                evidence=self.obj,
+                name=f"volatility3.plugins.yarascan.{scan_id}"
+            )
+            for old_scan in old_scans:
+                old_artefacts = old_scan.artefacts or {}
+                if isinstance(old_artefacts, dict) and old_artefacts.get("streaming"):
+                    old_file = old_artefacts.get("file", "")
+                    if old_file and os.path.exists(old_file):
+                        try:
+                            os.unlink(old_file)
+                        except Exception:
+                            pass
+            old_scans.delete()
+
+            type_renderers = DjangoRenderer._type_renderers
+            match_count = [0]
+            grid = builted_plugin.run()
+
+            from volatility3.framework.interfaces.renderers import BaseAbsentValue as _BaseAbsentValue
+            logger.info(f"Streaming YARA results to {results_file_path}")
+
+            with open(results_file_path, 'w', buffering=8192) as _results_file:
+                def _stream_visitor(node, accumulator):
+                    node_dict = {}
+                    for _ci in range(len(grid.columns)):
+                        _col = grid.columns[_ci]
+                        _renderer = type_renderers.get(_col.type, type_renderers["default"])
+                        _data = _renderer(list(node.values)[_ci])
+                        if isinstance(_data, _BaseAbsentValue):
+                            _data = None
+                        node_dict[_col.name] = _data
+                    _results_file.write(json.dumps(node_dict) + "\n")
+                    match_count[0] += 1
+                    return accumulator
+
+                if not grid.populated:
+                    grid.populate(_stream_visitor, ({}, []))
+                else:
+                    grid.visit(node=None, function=_stream_visitor, initial_accumulator=({}, []))
+
+            total_matches = match_count[0]
+            logger.info(f"YARA scan found {total_matches} matches, streamed to {results_file_path}")
+            result = total_matches > 0
+            
+            # Fix permissions
+            fix_permissions(self.evidence_data["output_path"])
+            
+            # === SAVE RESULTS TO DATABASE ===
+            # Store file reference + count instead of the full artefacts list
+            has_results = total_matches > 0
+            artefacts = {
+                "streaming": True,
+                "file": results_file_path,
+                "count": total_matches,
+            }
+
+            # Update description with actual results count
+            final_description = f"YARA scan using {' + '.join(scan_description_parts)} - {total_matches} matches found at {formatted_timestamp}"
+
+            VolatilityPlugin.objects.create(
+                name=f"volatility3.plugins.yarascan.{scan_id}",
+                evidence=self.obj,
+                icon="🔍",
+                description=final_description,
+                artefacts=artefacts,
+                category="Malware",
+                display="False",
+                results=has_results,
+            )
+            
+            # === CLEANUP OLD SCANS ===
+            
+            logger.info(f"YARA scan results saved to database as latest scan")
+            
+            logger.info(f"YARA scan completed for evidence '{self.obj.name}' - Found {total_matches} matches")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to run YARA scan on evidence '{self.obj.name}': {str(e)}")
+            logger.error(traceback.format_exc())
+            return None
+            
+        finally:
+            # Cleanup of temporary file
+            if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    logger.info(f"Cleaned up temporary YARA file: {temp_file_path}")
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup temp file: {cleanup_error}")
+

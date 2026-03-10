@@ -1,6 +1,8 @@
 import json
 import logging
 import importlib
+import signal
+import time
 from volatility3.framework.interfaces import plugins
 from volatility3.framework.configuration import requirements
 from volatility3.framework.renderers import TreeGrid
@@ -36,6 +38,18 @@ class VolWebMain(plugins.PluginInterface):
     def run_all(self):
         volweb_plugins = self.load_plugin_info("volatility_engine/volweb_plugins.json")
 
+        # Filter to selected plugins if specified via context config
+        selected_json = self.context.config.get("VolWeb.SelectedPlugins", None)
+        if selected_json:
+            selected = json.loads(selected_json)
+            volweb_plugins = {
+                name: details for name, details in volweb_plugins.items()
+                if name in selected
+            }
+
+        # Read optional PID filter
+        pid_filter = self.context.config.get("VolWeb.PidFilter", None)
+
         instances = {}
         for plugin, details in volweb_plugins.items():
             try:
@@ -50,9 +64,24 @@ class VolWebMain(plugins.PluginInterface):
 
         evidence_id = self.context.config["VolWeb.Evidence"]
         evidence = Evidence.objects.get(id=evidence_id)
+
+        # Read optional per-plugin timeout (in seconds)
+        plugin_timeout = self.context.config.get("VolWeb.PluginTimeout", None)
+
         count = 0
         total = len(instances.items())
         for name, plugin in instances.items():
+            # Pause/Stop check
+            evidence.refresh_from_db()
+            while evidence.extraction_control == "paused":
+                time.sleep(3)
+                evidence.refresh_from_db()
+                if evidence.extraction_control == "stop_requested":
+                    break
+            if evidence.extraction_control == "stop_requested":
+                vollog.info(f"Stop requested — halting extraction for evidence {evidence_id}")
+                break
+
             try:
                 vollog.info(f"RUNNING: {name}")
                 self.context.config["plugins.VolWebMain.dump"] = (
@@ -65,16 +94,47 @@ class VolWebMain(plugins.PluginInterface):
                 plugin["class"]._file_handler = file_handler(
                     f"media/{evidence_id}/"
                 )  # Our file_handler need to be passed to the sub-plugin
-                self._grid = plugin["class"].run()
-                renderer = DjangoRenderer(
-                    evidence_id=evidence_id, plugin=plugin["details"]
-                )  # Render the output of each plugin in the django database
-                renderer.render(self._grid)
+                if plugin_timeout:
+                    def _timeout_handler(signum, frame):
+                        raise TimeoutError(f"Plugin timed out after {plugin_timeout} seconds")
+                    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+                    signal.alarm(int(plugin_timeout))
+                    try:
+                        self._grid = plugin["class"].run()
+                        renderer = DjangoRenderer(
+                            evidence_id=evidence_id, plugin=plugin["details"]
+                        )
+                        renderer.render(self._grid)
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                else:
+                    self._grid = plugin["class"].run()
+                    renderer = DjangoRenderer(
+                        evidence_id=evidence_id, plugin=plugin["details"]
+                    )
+                    renderer.render(self._grid)
                 evidence.status = (count * 100) / total
                 count += 1
-                evidence.save()
-            except:
-                pass
+                evidence.refresh_from_db(fields=["extraction_control"])
+                evidence.save(update_fields=["status"])
+            except Exception as e:
+                vollog.error(f"FAILED: {name}: {e}")
+                from volatility_engine.models import VolatilityPlugin
+                VolatilityPlugin.objects.update_or_create(
+                    name=name,
+                    evidence=evidence,
+                    defaults={
+                        "icon": plugin["details"].get("icon", "None"),
+                        "description": plugin["details"].get("description", ""),
+                        "artefacts": None,
+                        "category": plugin["details"].get("category", "Other"),
+                        "display": plugin["details"].get("display", "True"),
+                        "results": False,
+                        "error_message": str(e),
+                    },
+                )
+                count += 1
 
     def _generator(self):
         yield (0, ("Success",))
