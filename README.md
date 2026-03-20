@@ -61,11 +61,13 @@ Once your case is closed, you can generate you STIX bundle and share your Indica
 
 VolWeb integrates YARA scanning to detect patterns and malware signatures within memory dumps. You can create rules manually, import them from `.yar` files or github repos, or paste existing rules directly into the editor. Rules can be organized into rulesets for better management and grouped scanning.
 
-<img width="1728" alt="image" src="">
+<img width="1800" height="990" alt="Screenshot 2026-03-20 at 23 38 49" src="https://github.com/user-attachments/assets/ffff3dcb-a1e2-4e7c-b5d6-911fb7cbe12c" />
 
 The scanning interface allows flexible selection of rulesets, individual rules, or custom combinations. Results appear in a searchable grid showing memory offsets and matched content. VolWeb automatically maintains your most recent scan, allowing quick access to the last result without re-running searches.
 
-<img width="1728" alt="image" src="">
+<img width="1800" height="990" alt="Screenshot 2026-03-21 at 00 27 16" src="https://github.com/user-attachments/assets/b4464250-19b9-4d09-b746-fe00c2e89bf1" />
+<img width="1800" height="990" alt="Screenshot 2026-03-21 at 00 29 04" src="https://github.com/user-attachments/assets/f2f5233c-064f-42bd-a84c-a0de5a9d4528" />
+
 
 ## 🪡 Interacting with the REST API
 
