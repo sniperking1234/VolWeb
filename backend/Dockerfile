@@ -5,8 +5,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/home/app/.local/bin:$PATH"
 
+ARG VOLATILITY3_GIT_URL="https://github.com/forensicxlab/volatility3.git"
+ARG VOLATILITY3_GIT_REF="perf-poolscan-physical-layer"
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends netcat-traditional \
+    && apt-get install -y --no-install-recommends git netcat-traditional \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --user-group --create-home --no-log-init --shell /bin/bash app
@@ -18,7 +21,8 @@ ENV PATH="/home/app/.local/bin:$PATH"
 COPY requirements.txt .
 
 RUN pip install --upgrade pip \
-    && pip install --user --no-cache-dir -r requirements.txt
+    && pip install --user --no-cache-dir -r requirements.txt \
+    && pip install --user --no-cache-dir "git+${VOLATILITY3_GIT_URL}@${VOLATILITY3_GIT_REF}"
 
 # Stage 2: Copy only the necessary parts from builder
 FROM python:3.12.6

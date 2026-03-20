@@ -23,9 +23,7 @@ services:
       - "6379:6379"
 
   volweb-backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: "forensicxlab/volweb-backend:latest"
     environment:
       - DATABASE=${DATABASE}
       - DATABASE_HOST=${DATABASE_HOST}
@@ -49,9 +47,7 @@ services:
       - media:/home/app/web/media
 
   volweb-workers:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: "forensicxlab/volweb-backend:latest"
     container_name: volweb-workers
     environment:
       - DATABASE=${DATABASE}
@@ -76,9 +72,7 @@ services:
       replicas: 1
 
   volweb-workers-yarascan:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: "forensicxlab/volweb-backend:latest"
     container_name: volweb-workers-yarascan
     environment:
       - DATABASE=${DATABASE}
@@ -105,9 +99,7 @@ services:
           memory: "${YARASCAN_MEM_LIMIT:-2g}"
 
   volweb-frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: "forensicxlab/volweb-frontend:latest"
     container_name: volweb-frontend
     ports:
       - "3000:3000"
